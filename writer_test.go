@@ -1,0 +1,159 @@
+package apiresponse_test
+
+import (
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/catstackdev/apiresponse"
+)
+
+var errNoRows = errors.New("no rows")
+
+type logCall struct {
+	r   *http.Request
+	err error
+	eb  *apiresponse.ErrorBody
+}
+
+func newTestWriter(calls *[]logCall) *apiresponse.Writer {
+	return apiresponse.NewWriter(
+		apiresponse.WithErrorMapper(func(err error) *apiresponse.ErrorBody {
+			if errors.Is(err, errNoRows) {
+				return apiresponse.NotFound("not found")
+			}
+			return nil
+		}),
+		apiresponse.WithLogger(func(r *http.Request, err error, eb *apiresponse.ErrorBody) {
+			*calls = append(*calls, logCall{r, err, eb})
+		}),
+	)
+}
+
+func TestWriter_MapperTranslatesDomainError(t *testing.T) {
+	var calls []logCall
+	rec := httptest.NewRecorder()
+	_ = newTestWriter(&calls).WriteError(rec, nil, errNoRows)
+	if rec.Code != 404 || !strings.Contains(rec.Body.String(), "not_found") {
+		t.Fatalf("code=%d body=%s", rec.Code, rec.Body)
+	}
+	if len(calls) != 0 {
+		t.Fatal("4xx must not be logged")
+	}
+}
+
+func TestWriter_ExistingErrorBodyBeatsMappers(t *testing.T) {
+	var calls []logCall
+	rec := httptest.NewRecorder()
+	_ = newTestWriter(&calls).WriteError(rec, nil, apiresponse.Conflict("dup"))
+	if rec.Code != 409 {
+		t.Fatalf("code=%d", rec.Code)
+	}
+}
+
+func TestWriter_LogsUnmappedErrorWithOriginalCause(t *testing.T) {
+	var calls []logCall
+	cause := errors.New("db down")
+	req := httptest.NewRequest("GET", "/x", nil)
+	rec := httptest.NewRecorder()
+	_ = newTestWriter(&calls).WriteError(rec, req, cause)
+
+	if rec.Code != 500 || strings.Contains(rec.Body.String(), "db down") {
+		t.Fatalf("code=%d body=%s", rec.Code, rec.Body)
+	}
+	if len(calls) != 1 || calls[0].err != cause || calls[0].r != req {
+		t.Fatalf("logger calls: %+v", calls)
+	}
+}
+
+func TestWriter_MappedErrorKeepsCause(t *testing.T) {
+	cause := errors.New("orig")
+	var got *apiresponse.ErrorBody
+	wr := apiresponse.NewWriter(
+		apiresponse.WithErrorMapper(func(error) *apiresponse.ErrorBody { return apiresponse.Internal("m") }),
+		apiresponse.WithLogger(func(_ *http.Request, _ error, eb *apiresponse.ErrorBody) { got = eb }),
+	)
+	_ = wr.WriteError(httptest.NewRecorder(), nil, cause)
+	if !errors.Is(got, cause) {
+		t.Fatal("mapped error lost its cause")
+	}
+}
+
+func TestRecover_TurnsPanicInto500(t *testing.T) {
+	var calls []logCall
+	h := newTestWriter(&calls).Recover(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic("kaboom")
+	}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+
+	if rec.Code != 500 || strings.Contains(rec.Body.String(), "kaboom") {
+		t.Fatalf("code=%d body=%s", rec.Code, rec.Body)
+	}
+	if len(calls) != 1 || !strings.Contains(calls[0].err.Error(), "kaboom") {
+		t.Fatalf("panic not logged: %+v", calls)
+	}
+}
+
+func TestRecover_RepanicsAbortHandler(t *testing.T) {
+	h := apiresponse.Recover(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic(http.ErrAbortHandler)
+	}))
+	defer func() {
+		if recover() != http.ErrAbortHandler {
+			t.Fatal("ErrAbortHandler must propagate")
+		}
+	}()
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
+}
+
+func TestWriter_MappersRunInOrderFirstWins(t *testing.T) {
+	wr := apiresponse.NewWriter(
+		apiresponse.WithLogger(nil),
+		apiresponse.WithErrorMapper(func(error) *apiresponse.ErrorBody { return nil }),
+		apiresponse.WithErrorMapper(func(error) *apiresponse.ErrorBody { return apiresponse.Forbidden("first") }),
+		apiresponse.WithErrorMapper(func(error) *apiresponse.ErrorBody { return apiresponse.Conflict("second") }),
+	)
+	rec := httptest.NewRecorder()
+	_ = wr.WriteError(rec, nil, errors.New("x"))
+	if rec.Code != 403 {
+		t.Fatalf("code=%d", rec.Code)
+	}
+}
+
+func TestWriter_DefaultLoggerHandlesNilRequest(t *testing.T) {
+	// Default logger (slog) must not panic with a nil request or on 5xx.
+	rec := httptest.NewRecorder()
+	_ = apiresponse.WriteError(rec, errors.New("boom"))
+	if rec.Code != 500 {
+		t.Fatalf("code=%d", rec.Code)
+	}
+}
+
+func TestWriter_ConcurrentUse(t *testing.T) {
+	wr := apiresponse.NewWriter(apiresponse.WithLogger(nil))
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			rec := httptest.NewRecorder()
+			_ = wr.WriteError(rec, nil, apiresponse.NotFound("x"))
+		}()
+	}
+	wg.Wait()
+}
+
+func TestRecover_PassesThroughWhenNoPanic(t *testing.T) {
+	h := apiresponse.Recover(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if rec.Code != http.StatusTeapot {
+		t.Fatalf("code=%d", rec.Code)
+	}
+}
