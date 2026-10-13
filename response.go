@@ -1,10 +1,12 @@
 package apiresponse
 
 // Response is the success envelope. Data is a pointer so that a legitimately
-// empty value (0, "", false) is still serialized.
+// empty value (0, "", false) is still serialized. Summary is optional extra
+// data about the whole result set, such as report totals; see [ListWithSummary].
 type Response[T any] struct {
 	Data       *T          `json:"data"`
 	Pagination *Pagination `json:"pagination,omitempty"`
+	Summary    any         `json:"summary,omitempty"`
 }
 
 // Pagination describes a page of results. It supports both cursor-based
@@ -29,6 +31,14 @@ func List[T any](items []T, p Pagination) Response[[]T] {
 		items = []T{}
 	}
 	return Response[[]T]{Data: &items, Pagination: &p}
+}
+
+// ListWithSummary is [List] plus a summary of the whole filtered set (not just
+// this page), e.g. a grand total for a report. A nil summary is omitted.
+func ListWithSummary[T any](items []T, p Pagination, summary any) Response[[]T] {
+	r := List(items, p)
+	r.Summary = summary
+	return r
 }
 
 // CursorPage builds cursor-based pagination. A nil next means the last page.

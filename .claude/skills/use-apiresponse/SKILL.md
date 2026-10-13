@@ -56,6 +56,16 @@ c.JSON(e.HTTPStatus(), apiresponse.ErrorResponse{Error: e})
 - Offset: `apiresponse.List(items, apiresponse.OffsetPage(page, limit, total))`
   (page is 1-based).
 
+- Totals for the whole filtered set:
+  `apiresponse.ListWithSummary(items, page, summary)` adds `"summary"`.
+
+## Reading request bodies
+
+`req, err := apiresponse.Decode[CreateUser](w, r); if err != nil { return err }`.
+1 MiB limit (`DecodeLimit` to change), unknown fields rejected, errors come back
+as 400/413/415 `*ErrorBody`. For `Retry-After` on a 429, set the header before
+returning `RateLimited`. Return errors only before writing a response.
+
 ## Mapping domain errors and logging
 
 Build one `Writer` at startup and reuse it; do not create one per request.
@@ -80,7 +90,8 @@ into every error body from the request (header or context).
 
 Extra constructors: `MethodNotAllowed`, `UnsupportedMediaType`,
 `PayloadTooLarge`, `ServiceUnavailable`, `DeadlineExceeded`. Compare errors with
-`errors.Is(err, sentinel)` (matches by code, survives `With*` copies) or
+`errors.Is(err, sentinel)` (matches by code and message, survives `With*`
+copies; two `NotFound` sentinels with different messages do not match) or
 `apiresponse.IsCode(err, code)`.
 
 ## Pitfalls

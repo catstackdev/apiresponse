@@ -37,6 +37,9 @@ deliberately live in the same package as responses because `WriteError`,
   `WithRequestIDFunc`) holds the real logic: `Write`, `WriteError`, `Handler`.
   Error resolution order: existing `*ErrorBody` in the chain, then mappers, then
   generic 500.
+- `decode.go`: `Decode[T]` / `DecodeLimit[T]` request-body helpers (size limit,
+  unknown fields rejected, single JSON value). Failures are `*ErrorBody` (400,
+  413, 415) ready for `Handler`.
 - `recover.go`: `Writer.Recover` panic middleware (re-panics
   `http.ErrAbortHandler`).
 - `write.go`: package-level `Write`, `WriteError`, `Handler`, `Recover`
@@ -87,6 +90,8 @@ Behaviors that span files and are easy to break:
 - `.claude/skills/use-apiresponse/SKILL.md` is the usage guide for consumers of
   this library. Update it (and the README) whenever the public API or
   error-resolution behavior changes.
-- `ErrorBody.Is` matches by `Code` only, so `errors.Is` works across `With*`
-  copies; keep codes unique per meaning. Request IDs from `WithRequestIDFunc`
+- `ErrorBody.Is` matches by `Code` AND `Message`, so `errors.Is` works across
+  `With*` copies while sentinels sharing a code (`ErrUserNotFound`,
+  `ErrOrderNotFound`) stay distinct. Never change a sentinel's message in a
+  `With*` method. `IsCode` is the code-only check. Request IDs from `WithRequestIDFunc`
   are applied on a copy in `Writer.WriteError`, never on the shared error.

@@ -127,7 +127,7 @@ var errSentinel = apiresponse.NotFound("user not found")
 func TestIs_SurvivesWithCopies(t *testing.T) {
 	copied := fmt.Errorf("ctx: %w", errSentinel.WithRequestID("r1").WithCause(errors.New("db")))
 	if !errors.Is(copied, errSentinel) {
-		t.Fatal("errors.Is must match sentinel by code after copies")
+		t.Fatal("errors.Is must match sentinel after copies")
 	}
 	if errors.Is(copied, apiresponse.Conflict("x")) {
 		t.Fatal("different code must not match")
@@ -165,5 +165,16 @@ func TestFromError_TypedNilBodyBecomes500(t *testing.T) {
 	}
 	if apiresponse.IsCode(err, "INTERNAL") {
 		t.Fatal("typed nil must not match a code")
+	}
+}
+
+func TestIs_DistinguishesSentinelsSharingACode(t *testing.T) {
+	errUser := apiresponse.NotFound("user not found")
+	errProduct := apiresponse.NotFound("product not found")
+	if errors.Is(errProduct, errUser) {
+		t.Fatal("sentinels with different messages must not match")
+	}
+	if !apiresponse.IsCode(errProduct, apiresponse.CodeNotFound) {
+		t.Fatal("IsCode must still match on code alone")
 	}
 }

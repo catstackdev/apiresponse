@@ -2,6 +2,7 @@ package apiresponse_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/catstackdev/apiresponse"
@@ -98,5 +99,24 @@ func TestOK_Struct(t *testing.T) {
 	}
 	if got := marshal(t, apiresponse.OK(u{ID: 7})); got != `{"data":{"id":7}}` {
 		t.Fatalf("got %s", got)
+	}
+}
+
+func TestListWithSummary(t *testing.T) {
+	type totals struct {
+		Amount int `json:"amount"`
+	}
+	resp := apiresponse.ListWithSummary([]int{1}, apiresponse.OffsetPage(1, 10, 1), totals{Amount: 42})
+	b, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = `"summary":{"amount":42}`
+	if !strings.Contains(string(b), want) {
+		t.Fatalf("%s missing %s", b, want)
+	}
+	b, _ = json.Marshal(apiresponse.ListWithSummary([]int{}, apiresponse.OffsetPage(1, 10, 0), nil))
+	if strings.Contains(string(b), "summary") {
+		t.Fatalf("nil summary must be omitted: %s", b)
 	}
 }

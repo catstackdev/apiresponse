@@ -96,7 +96,9 @@ func (wr *Writer) WriteError(w http.ResponseWriter, r *http.Request, err error) 
 
 // Handler adapts a HandlerFunc to http.HandlerFunc, writing any returned error
 // with WriteError. The result works with net/http, chi, and anything else that
-// accepts an http.Handler.
+// accepts an http.Handler. Return an error only before writing a response: if fn
+// has already written a body, the error envelope is written after it. Headers
+// set before returning an error (e.g. Retry-After on a 429) are kept.
 func (wr *Writer) Handler(fn HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := fn(w, r); err != nil {

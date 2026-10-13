@@ -100,11 +100,13 @@ func (e *ErrorBody) Error() string {
 // Unwrap exposes the underlying cause to errors.Is / errors.As.
 func (e *ErrorBody) Unwrap() error { return e.cause }
 
-// Is reports whether target is an *ErrorBody with the same Code. This keeps
-// errors.Is(err, ErrSentinel) working after With* methods return copies.
+// Is reports whether target is an *ErrorBody with the same Code and Message.
+// This keeps errors.Is(err, ErrSentinel) working after With* methods return
+// copies, while sentinels that share a code (ErrUserNotFound, ErrOrderNotFound)
+// stay distinct. Use [IsCode] to match on the code alone.
 func (e *ErrorBody) Is(target error) bool {
 	t, ok := target.(*ErrorBody)
-	return ok && t != nil && e.Code == t.Code
+	return ok && t != nil && e.Code == t.Code && e.Message == t.Message
 }
 
 // IsCode reports whether err wraps an *ErrorBody with the given code.

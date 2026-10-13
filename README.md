@@ -49,6 +49,20 @@ The HTTP status code says success or failure; the body never repeats it.
   }
 }
 
+// List with a summary of the whole filtered set (apiresponse.ListWithSummary)
+{
+  "data": [],
+  "pagination": {
+    "limit": 10,
+    "has_more": false,
+    "page": 1,
+    "total": 0
+  },
+  "summary": {
+    "total_amount": 0
+  }
+}
+
 // Error
 {
   "error": {
@@ -102,6 +116,8 @@ them for your clients alongside this table.
 
 - `details` appears only on `validation_failed`. `details[].field` may be empty
   when the problem is not tied to one field.
+- `summary`, when present, describes the whole filtered set (for example a grand
+  total), not just the current page.
 - `request_id`, when present, is what to quote in a bug report so the server
   logs can be found. Show it in "something went wrong" screens.
 - 5xx messages are deliberately generic (`internal server error`). Internal
@@ -176,6 +192,8 @@ http.ListenAndServe(":8080", apiresponse.Recover(mux))
 | List            | `List(items, CursorPage(limit, next))` or `OffsetPage(page, limit, total)`                                                                                                                                                                                         |
 | No content      | `Write(w, 204, nil)`                                                                                                                                                                                                                                               |
 | Errors          | `BadRequest`, `Unauthorized`, `Forbidden`, `NotFound`, `Conflict`, `Validation(details...)`, `RateLimited`, `Internal`, `MethodNotAllowed`, `UnsupportedMediaType`, `PayloadTooLarge`, `ServiceUnavailable`, `DeadlineExceeded` (504), or `New(status, code, msg)` |
+| List + totals   | `ListWithSummary(items, page, summary)`; `summary` is any struct, omitted when nil                                                                                                                                                                                 |
+| Read a body     | `Decode[T](w, r)` or `DecodeLimit[T](w, r, maxBytes)`: 1 MiB default limit, unknown fields rejected; returns 400/413/415 as `*ErrorBody`                                                                                                                           |
 | Enrich an error | `.WithDetails(...)`, `.WithRequestID(id)`, `.WithCause(err)`, `.WithStatus(n)` (each returns a copy)                                                                                                                                                               |
 | Any error       | `WriteError(w, err)`                                                                                                                                                                                                                                               |
 
@@ -250,14 +268,21 @@ in registration order, then a generic 500.
 
 - Unknown errors never leak: the client sees `internal server error`. A
   typed-nil `*ErrorBody` is treated as an unknown error (generic 500).
+- `Decode` accepts a missing `Content-Type`, rejects any other non-JSON one
+  (415), and allows exactly one JSON value in the body.
 - `Data` is a pointer, so `0`, `""` and `false` are still serialized; a nil
   slice in `List` becomes `[]`.
 - JSON is written without HTML escaping.
 - `Write` marshals before sending headers, so an encode failure is a clean 500.
   1xx, 204 and 304 responses carry no body.
-- Sentinels match by code: `errors.Is(err, ErrUserNotFound)` stays true after
-  `With*` copies. `apiresponse.IsCode(err, apiresponse.CodeNotFound)` checks
-  just the code.
+- Sentinels match by code and message: `errors.Is(err, ErrUserNotFound)` stays
+  true after `With*` copies, and `ErrUserNotFound` does not match
+  `ErrOrderNotFound` even though both are `not_found`.
+  `apiresponse.IsCode(err, apiresponse.CodeNotFound)` checks just the code.
+- `Handler` writes the error envelope after whatever `fn` already wrote, so
+  return an error only before writing a response. Headers set before returning
+  an error are kept; for a 429, set `Retry-After` yourself:
+  `w.Header().Set("Retry-After", "30"); return apiresponse.RateLimited("slow down")`.
 - `With*` methods copy, so package-level sentinel errors are safe:
   `var ErrUserNotFound = apiresponse.NotFound("user not found")`.
 
