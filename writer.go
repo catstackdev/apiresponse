@@ -21,8 +21,9 @@ type Logger func(r *http.Request, err error, eb *ErrorBody)
 // zero value is not usable; create one with NewWriter. A Writer is safe for
 // concurrent use once constructed.
 type Writer struct {
-	mappers []ErrorMapper
-	logger  Logger
+	mappers   []ErrorMapper
+	logger    Logger
+	requestID func(r *http.Request) string
 }
 
 // Option configures a Writer.
@@ -37,6 +38,15 @@ func WithErrorMapper(m ErrorMapper) Option {
 // WithLogger replaces the default slog-based logger. Pass nil to disable logging.
 func WithLogger(l Logger) Option {
 	return func(wr *Writer) { wr.logger = l }
+}
+
+// WithRequestIDFunc sets how to obtain a request ID from the request, e.g.
+// reading the X-Request-ID header or a context value set by middleware. Errors
+// without a request ID get one filled in automatically (on a copy, so shared
+// sentinel errors are never mutated). Has no effect when WriteError is called
+// without a request.
+func WithRequestIDFunc(fn func(r *http.Request) string) Option {
+	return func(wr *Writer) { wr.requestID = fn }
 }
 
 // NewWriter creates a Writer. By default 5xx errors are logged with slog.
@@ -73,6 +83,11 @@ func (wr *Writer) Write(w http.ResponseWriter, status int, v any) error {
 // The returned error is the write/marshal failure, not err itself.
 func (wr *Writer) WriteError(w http.ResponseWriter, r *http.Request, err error) error {
 	eb := wr.resolve(err)
+	if eb.RequestID == "" && wr.requestID != nil && r != nil {
+		if id := wr.requestID(r); id != "" {
+			eb = eb.WithRequestID(id)
+		}
+	}
 	if eb.HTTPStatus() >= http.StatusInternalServerError && wr.logger != nil {
 		wr.logger(r, err, eb)
 	}

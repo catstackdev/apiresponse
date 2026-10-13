@@ -58,7 +58,7 @@ http.ListenAndServe(":8080", apiresponse.Recover(mux))
 | Single item     | `OK(v)`                                                                                                                                             |
 | List            | `List(items, CursorPage(limit, next))` or `OffsetPage(page, limit, total)`                                                                          |
 | No content      | `Write(w, 204, nil)`                                                                                                                                |
-| Errors          | `BadRequest`, `Unauthorized`, `Forbidden`, `NotFound`, `Conflict`, `Validation(details...)`, `RateLimited`, `Internal`, or `New(status, code, msg)` |
+| Errors          | `BadRequest`, `Unauthorized`, `Forbidden`, `NotFound`, `Conflict`, `Validation(details...)`, `RateLimited`, `Internal`, `MethodNotAllowed`, `UnsupportedMediaType`, `PayloadTooLarge`, `ServiceUnavailable`, `DeadlineExceeded` (504), or `New(status, code, msg)` |
 | Enrich an error | `.WithDetails(...)`, `.WithRequestID(id)`, `.WithCause(err)`, `.WithStatus(n)` (each returns a copy)                                                |
 | Any error       | `WriteError(w, err)`                                                                                                                                |
 
@@ -109,6 +109,15 @@ mux.Handle("GET /users/{id}", w.Handler(getUser))
 srv := http.Server{Handler: w.Recover(mux)}
 ```
 
+Optional writer options:
+
+```go
+apiresponse.WithErrorMapper(apiresponse.ContextErrors) // context.DeadlineExceeded -> 504
+apiresponse.WithRequestIDFunc(func(r *http.Request) string {
+    return r.Header.Get("X-Request-ID") // filled into error bodies automatically
+})
+```
+
 Error resolution order: an `*ErrorBody` already in the error chain, then mappers
 in registration order, then a generic 500.
 
@@ -127,6 +136,9 @@ in registration order, then a generic 500.
 - JSON is written without HTML escaping.
 - `Write` marshals before sending headers, so an encode failure is a clean 500.
   1xx, 204 and 304 responses carry no body.
+- Sentinels match by code: `errors.Is(err, ErrUserNotFound)` stays true after
+  `With*` copies. `apiresponse.IsCode(err, apiresponse.CodeNotFound)` checks
+  just the code.
 - `With*` methods copy, so package-level sentinel errors are safe:
   `var ErrUserNotFound = apiresponse.NotFound("user not found")`.
 

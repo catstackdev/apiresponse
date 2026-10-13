@@ -157,3 +157,45 @@ func TestRecover_PassesThroughWhenNoPanic(t *testing.T) {
 		t.Fatalf("code=%d", rec.Code)
 	}
 }
+
+func TestWriter_RequestIDFilledIn(t *testing.T) {
+	wr := apiresponse.NewWriter(
+		apiresponse.WithLogger(nil),
+		apiresponse.WithRequestIDFunc(func(r *http.Request) string { return r.Header.Get("X-Request-ID") }),
+	)
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("X-Request-ID", "req_abc123")
+
+	shared := apiresponse.NotFound("x")
+	rec := httptest.NewRecorder()
+	_ = wr.WriteError(rec, req, shared)
+	if !strings.Contains(rec.Body.String(), `"request_id":"req_abc123"`) {
+		t.Fatalf("body %s", rec.Body)
+	}
+	if shared.RequestID != "" {
+		t.Fatal("shared sentinel was mutated")
+	}
+}
+
+func TestWriter_RequestIDNotOverwritten(t *testing.T) {
+	wr := apiresponse.NewWriter(
+		apiresponse.WithRequestIDFunc(func(*http.Request) string { return "auto" }),
+	)
+	rec := httptest.NewRecorder()
+	_ = wr.WriteError(rec, httptest.NewRequest("GET", "/", nil), apiresponse.NotFound("x").WithRequestID("manual"))
+	if !strings.Contains(rec.Body.String(), `"request_id":"manual"`) {
+		t.Fatalf("body %s", rec.Body)
+	}
+}
+
+func TestWriter_RequestIDSkippedWithoutRequestOrID(t *testing.T) {
+	wr := apiresponse.NewWriter(
+		apiresponse.WithRequestIDFunc(func(*http.Request) string { return "" }),
+	)
+	rec := httptest.NewRecorder()
+	_ = wr.WriteError(rec, nil, apiresponse.NotFound("x"))
+	_ = wr.WriteError(rec, httptest.NewRequest("GET", "/", nil), apiresponse.NotFound("x"))
+	if strings.Contains(rec.Body.String(), "request_id") {
+		t.Fatalf("body %s", rec.Body)
+	}
+}

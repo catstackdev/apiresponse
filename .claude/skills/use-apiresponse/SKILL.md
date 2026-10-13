@@ -74,6 +74,15 @@ Resolution order: existing `*ErrorBody` in the chain, then mappers, then a
 generic 500. Prefer a mapper over scattering `NotFound(...)` conversions across
 the service layer.
 
+Useful options: `WithErrorMapper(apiresponse.ContextErrors)` maps
+`context.DeadlineExceeded` to a 504; `WithRequestIDFunc(fn)` fills `request_id`
+into every error body from the request (header or context).
+
+Extra constructors: `MethodNotAllowed`, `UnsupportedMediaType`,
+`PayloadTooLarge`, `ServiceUnavailable`, `DeadlineExceeded`. Compare errors with
+`errors.Is(err, sentinel)` (matches by code, survives `With*` copies) or
+`apiresponse.IsCode(err, code)`.
+
 ## Pitfalls
 
 - `With*` methods return copies; use the returned value. `e.WithRequestID(id)`

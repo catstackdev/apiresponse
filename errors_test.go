@@ -1,6 +1,7 @@
 package apiresponse_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -99,5 +100,59 @@ func TestDetail_FieldOmittedWhenEmpty(t *testing.T) {
 func TestFromError_Nil(t *testing.T) {
 	if got := apiresponse.FromError(nil); got.HTTPStatus() != 500 {
 		t.Fatalf("got %d", got.HTTPStatus())
+	}
+}
+
+func TestNewConstructors_StatusAndCode(t *testing.T) {
+	cases := []struct {
+		err    *apiresponse.ErrorBody
+		status int
+		code   string
+	}{
+		{apiresponse.MethodNotAllowed("x"), 405, apiresponse.CodeMethodNotAllowed},
+		{apiresponse.UnsupportedMediaType("x"), 415, apiresponse.CodeUnsupportedMediaType},
+		{apiresponse.PayloadTooLarge("x"), 413, apiresponse.CodePayloadTooLarge},
+		{apiresponse.ServiceUnavailable("x"), 503, apiresponse.CodeServiceUnavailable},
+		{apiresponse.DeadlineExceeded("x"), 504, apiresponse.CodeDeadlineExceeded},
+	}
+	for _, c := range cases {
+		if c.err.HTTPStatus() != c.status || c.err.Code != c.code {
+			t.Errorf("%s: got %d/%s", c.code, c.err.HTTPStatus(), c.err.Code)
+		}
+	}
+}
+
+var errSentinel = apiresponse.NotFound("user not found")
+
+func TestIs_SurvivesWithCopies(t *testing.T) {
+	copied := fmt.Errorf("ctx: %w", errSentinel.WithRequestID("r1").WithCause(errors.New("db")))
+	if !errors.Is(copied, errSentinel) {
+		t.Fatal("errors.Is must match sentinel by code after copies")
+	}
+	if errors.Is(copied, apiresponse.Conflict("x")) {
+		t.Fatal("different code must not match")
+	}
+	if errors.Is(errors.New("plain"), errSentinel) {
+		t.Fatal("plain error must not match")
+	}
+}
+
+func TestIsCode(t *testing.T) {
+	err := fmt.Errorf("wrap: %w", apiresponse.Conflict("dup"))
+	if !apiresponse.IsCode(err, apiresponse.CodeConflict) || apiresponse.IsCode(err, apiresponse.CodeNotFound) {
+		t.Fatal("IsCode mismatch")
+	}
+	if apiresponse.IsCode(nil, apiresponse.CodeConflict) || apiresponse.IsCode(errors.New("x"), apiresponse.CodeConflict) {
+		t.Fatal("non-ErrorBody must not match")
+	}
+}
+
+func TestContextErrors(t *testing.T) {
+	got := apiresponse.ContextErrors(fmt.Errorf("query: %w", context.DeadlineExceeded))
+	if got == nil || got.HTTPStatus() != 504 {
+		t.Fatalf("deadline: %+v", got)
+	}
+	if apiresponse.ContextErrors(context.Canceled) != nil || apiresponse.ContextErrors(errors.New("x")) != nil {
+		t.Fatal("only DeadlineExceeded should map")
 	}
 }

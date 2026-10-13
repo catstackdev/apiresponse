@@ -30,10 +30,13 @@ deliberately live in the same package as responses because `WriteError`,
 - `response.go`: success envelope `Response[T]` (`Data *T`, optional
   `Pagination`) and constructors `OK`, `List`, `CursorPage`, `OffsetPage`.
 - `errors.go`: `ErrorBody` (implements `error`), `ErrorResponse` envelope, code
-  constants, constructors per HTTP status, `FromError`.
-- `writer.go`: `Writer` (options `WithErrorMapper`, `WithLogger`) holds the real
-  logic: `Write`, `WriteError`, `Handler`. Error resolution order: existing
-  `*ErrorBody` in the chain, then mappers, then generic 500.
+  constants, constructors per HTTP status (adding a code means adding its
+  constructor, a test row, and the README table), `FromError`, `IsCode`, and the
+  opt-in `ContextErrors` mapper (`DeadlineExceeded` -> 504).
+- `writer.go`: `Writer` (options `WithErrorMapper`, `WithLogger`,
+  `WithRequestIDFunc`) holds the real logic: `Write`, `WriteError`, `Handler`.
+  Error resolution order: existing `*ErrorBody` in the chain, then mappers, then
+  generic 500.
 - `recover.go`: `Writer.Recover` panic middleware (re-panics
   `http.ErrAbortHandler`).
 - `write.go`: package-level `Write`, `WriteError`, `Handler`, `Recover`
@@ -74,4 +77,9 @@ Behaviors that span files and are easy to break:
 
 - CI is `.github/workflows/ci.yml` (vet, `go test -race`, golangci-lint); not
   verified locally.
-- `.claude/skills/use-apiresponse/SKILL.md` is the usage guide for consumers of this library. Update it (and the README) whenever the public API or error-resolution behavior changes.
+- `.claude/skills/use-apiresponse/SKILL.md` is the usage guide for consumers of
+  this library. Update it (and the README) whenever the public API or
+  error-resolution behavior changes.
+- `ErrorBody.Is` matches by `Code` only, so `errors.Is` works across `With*`
+  copies; keep codes unique per meaning. Request IDs from `WithRequestIDFunc`
+  are applied on a copy in `Writer.WriteError`, never on the shared error.
