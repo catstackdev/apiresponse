@@ -4,7 +4,7 @@ Framework-agnostic JSON response envelope for Go HTTP APIs. Standard library
 only. Needs Go 1.22+.
 
 ```bash
-go get github.com/catstackdev/apiresponse@v0.1.0
+go get github.com/catstackdev/apiresponse@v0.1.1
 ```
 
 Before the repo is pushed (or while it is private), use a local checkout from
@@ -296,7 +296,7 @@ that uses apiresponse, or globally for all your projects.
 **Option 1: via Go (matches the version you installed)**
 
 ```bash
-go get github.com/catstackdev/apiresponse@v0.1.0
+go get github.com/catstackdev/apiresponse@v0.1.1
 SRC="$(go list -m -f '{{.Dir}}' github.com/catstackdev/apiresponse)/.claude/skills/use-apiresponse"
 
 # This project only
@@ -325,7 +325,7 @@ gh skill install catstackdev/apiresponse use-apiresponse \
   --allow-hidden-dirs --agent claude-code --scope user
 
 # Pin a version, and update later
-gh skill install catstackdev/apiresponse use-apiresponse@v0.1.0 \
+gh skill install catstackdev/apiresponse use-apiresponse@v0.1.1 \
   --allow-hidden-dirs --agent claude-code
 gh skill update
 ```
