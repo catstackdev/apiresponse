@@ -156,3 +156,14 @@ func TestContextErrors(t *testing.T) {
 		t.Fatal("only DeadlineExceeded should map")
 	}
 }
+
+func TestFromError_TypedNilBodyBecomes500(t *testing.T) {
+	var nilBody *apiresponse.ErrorBody
+	var err error = nilBody
+	if got := apiresponse.FromError(err).HTTPStatus(); got != 500 {
+		t.Fatalf("status = %d, want 500", got)
+	}
+	if apiresponse.IsCode(err, "INTERNAL") {
+		t.Fatal("typed nil must not match a code")
+	}
+}

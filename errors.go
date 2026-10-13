@@ -109,8 +109,8 @@ func (e *ErrorBody) Is(target error) bool {
 
 // IsCode reports whether err wraps an *ErrorBody with the given code.
 func IsCode(err error, code string) bool {
-	var eb *ErrorBody
-	return errors.As(err, &eb) && eb.Code == code
+	eb := findErrorBody(err)
+	return eb != nil && eb.Code == code
 }
 
 // ContextErrors is an opt-in ErrorMapper that turns context.DeadlineExceeded
@@ -165,9 +165,18 @@ func (e *ErrorBody) WithStatus(status int) *ErrorBody {
 // *ErrorBody it is returned as is. Anything else becomes a generic 500 whose
 // message does not leak internals; the original is kept as the cause.
 func FromError(err error) *ErrorBody {
-	var eb *ErrorBody
-	if errors.As(err, &eb) {
+	if eb := findErrorBody(err); eb != nil {
 		return eb
 	}
 	return Internal("internal server error").WithCause(err)
+}
+
+// findErrorBody returns the first non-nil *ErrorBody in err's chain, or nil.
+// A typed-nil *ErrorBody is skipped so callers never dereference it.
+func findErrorBody(err error) *ErrorBody {
+	var eb *ErrorBody
+	if errors.As(err, &eb) && eb != nil {
+		return eb
+	}
+	return nil
 }

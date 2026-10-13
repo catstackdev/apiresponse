@@ -20,8 +20,17 @@ func (wr *Writer) Recover(next http.Handler) http.Handler {
 			if v == http.ErrAbortHandler {
 				panic(v)
 			}
-			_ = wr.WriteError(w, r, fmt.Errorf("panic: %v\n%s", v, debug.Stack()))
+			_ = wr.WriteError(w, r, &panicError{value: v, stack: debug.Stack()})
 		}()
 		next.ServeHTTP(w, r)
 	})
 }
+
+// panicError carries a recovered panic value. The stack is kept out of the
+// message so it can be logged as its own attribute.
+type panicError struct {
+	value any
+	stack []byte
+}
+
+func (p *panicError) Error() string { return fmt.Sprintf("panic: %v", p.value) }

@@ -106,8 +106,7 @@ func (wr *Writer) Handler(fn HandlerFunc) http.HandlerFunc {
 }
 
 func (wr *Writer) resolve(err error) *ErrorBody {
-	var eb *ErrorBody
-	if errors.As(err, &eb) {
+	if eb := findErrorBody(err); eb != nil {
 		return eb
 	}
 	for _, m := range wr.mappers {
@@ -125,6 +124,10 @@ func defaultLogger(r *http.Request, err error, eb *ErrorBody) {
 	attrs := []any{"code", eb.Code, "status", eb.HTTPStatus(), "error", err}
 	if r != nil {
 		attrs = append(attrs, "method", r.Method, "path", r.URL.Path)
+	}
+	var pe *panicError
+	if errors.As(err, &pe) {
+		attrs = append(attrs, "stack", string(pe.stack))
 	}
 	slog.Error("apiresponse: server error", attrs...)
 }

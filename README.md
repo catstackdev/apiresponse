@@ -125,12 +125,14 @@ in registration order, then a generic 500.
   the original error, so the real cause is visible. `WithLogger(nil)` disables
   it. `r` is nil when `WriteError` is called without a request.
 - **Panics:** `Recover` returns the standard 500 envelope and logs the panic
-  with its stack. It re-panics `http.ErrAbortHandler`. If the handler already
+  with its stack as a separate `stack` attribute (the error message is just
+  `panic: <value>`). It re-panics `http.ErrAbortHandler`. If the handler already
   started writing, the status cannot be changed.
 
 ## Behavior notes
 
-- Unknown errors never leak: the client sees `internal server error`.
+- Unknown errors never leak: the client sees `internal server error`. A
+  typed-nil `*ErrorBody` is treated as an unknown error (generic 500).
 - `Data` is a pointer, so `0`, `""` and `false` are still serialized; a nil
   slice in `List` becomes `[]`.
 - JSON is written without HTML escaping.

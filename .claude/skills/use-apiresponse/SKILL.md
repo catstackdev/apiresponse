@@ -90,6 +90,8 @@ Extra constructors: `MethodNotAllowed`, `UnsupportedMediaType`,
 - Sentinel errors (`var ErrX = apiresponse.NotFound(...)`) are safe to share.
 - `WriteError(w, err)` passes a nil request to the logger; use
   `Writer.WriteError(w, r, err)` or `Handler` when the logger needs the path.
-- `Recover` cannot change the status if the handler already started writing.
+- `Recover` cannot change the status if the handler already started writing. The
+  default logger logs the panic stack as a `stack` attribute; a custom
+  `WithLogger` only receives `panic: <value>` as the error.
 - Validation errors are 422 with `Details`; use `BadRequest` for malformed input
   that is not field-level (e.g. unparsable JSON).

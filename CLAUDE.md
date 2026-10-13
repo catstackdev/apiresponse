@@ -58,6 +58,13 @@ Behaviors that span files and are easy to break:
 - **`Write` marshals before `WriteHeader`**, so an encode failure produces a
   clean 500 (`internalBody`) rather than a half-written response. 1xx/204/304
   write no body.
+- **Typed-nil `*ErrorBody` is ignored.** `findErrorBody` (errors.go) is the one
+  place that searches an error chain; `FromError`, `IsCode` and
+  `Writer.resolve` all use it so a nil `*ErrorBody` never gets dereferenced.
+- **Panics:** `Recover` wraps the value in an unexported `panicError` (message
+  `panic: <v>`, stack kept separately); the default logger emits the stack as a
+  `stack` attr. Custom `Logger`s only get `panic: <v>` as the error (the type is
+  unexported), so the stack is default-logger-only by design.
 - **5xx logging:** the Logger fires only for 5xx and receives the original error
   (mapped errors get it attached as cause). `r` may be nil when called via
   package-level `WriteError`.

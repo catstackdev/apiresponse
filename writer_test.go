@@ -199,3 +199,14 @@ func TestWriter_RequestIDSkippedWithoutRequestOrID(t *testing.T) {
 		t.Fatalf("body %s", rec.Body)
 	}
 }
+
+func TestRecover_DefaultLoggerHandlesPanicStack(t *testing.T) {
+	h := apiresponse.Recover(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic("kaboom")
+	}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+}
