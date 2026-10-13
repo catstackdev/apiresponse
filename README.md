@@ -263,21 +263,54 @@ in registration order, then a generic 500.
 
 ## Claude Code skill
 
-This repo ships a project skill at `.claude/skills/use-apiresponse/SKILL.md`. It
-teaches Claude Code to use this library (envelope, errors, pagination, mappers,
-pitfalls) instead of writing ad-hoc JSON responses.
+This repo ships a skill at `.claude/skills/use-apiresponse/SKILL.md`. It teaches
+Claude Code to use this library (envelope, errors, pagination, mappers,
+pitfalls) instead of writing ad-hoc JSON responses. Install it into the project
+that uses apiresponse, or globally for all your projects.
 
-- **In this repo:** it loads automatically; nothing to do.
-- **In a project that uses apiresponse:** copy the folder once.
+**Option 1: via Go (matches the version you installed)**
 
-  ```bash
-  mkdir -p .claude/skills
-  cp -r ~/work/personal-lib/apiresponse/.claude/skills/use-apiresponse .claude/skills/
-  ```
+```bash
+go get github.com/catstackdev/apiresponse@v0.1.0
+SRC="$(go list -m -f '{{.Dir}}' github.com/catstackdev/apiresponse)/.claude/skills/use-apiresponse"
 
-  Then ask things like "add a GET /orders endpoint with cursor pagination" and
-  Claude will pick the skill up from its description. Re-copy after changing the
-  library API so the skill does not go stale.
+# This project only
+mkdir -p .claude/skills
+cp -r "$SRC" .claude/skills/
+chmod -R u+w .claude/skills/use-apiresponse
+
+# Or global (every project)
+mkdir -p ~/.claude/skills
+cp -r "$SRC" ~/.claude/skills/
+chmod -R u+w ~/.claude/skills/use-apiresponse
+```
+
+The `chmod` is needed because the Go module cache is read-only. Re-run after
+upgrading the library so the skill does not go stale.
+
+**Option 2: via the GitHub CLI**
+
+```bash
+# This project only
+gh skill install catstackdev/apiresponse use-apiresponse \
+  --allow-hidden-dirs --agent claude-code
+
+# Or global (every project)
+gh skill install catstackdev/apiresponse use-apiresponse \
+  --allow-hidden-dirs --agent claude-code --scope user
+
+# Pin a version, and update later
+gh skill install catstackdev/apiresponse use-apiresponse@v0.1.0 \
+  --allow-hidden-dirs --agent claude-code
+gh skill update
+```
+
+`--allow-hidden-dirs` is required because the skill lives under `.claude/`.
+`gh` prints a warning about hidden directories; that is expected here.
+
+**Using it:** ask things like "add a GET /orders endpoint with cursor
+pagination" and Claude picks the skill up from its description. Inside this repo
+it loads automatically.
 
 ## Development
 
