@@ -7,8 +7,8 @@ only. Needs Go 1.22+.
 go get github.com/catstackdev/apiresponse@v0.1.0
 ```
 
-Before the repo is pushed (or while it is private), use a local checkout from the
-consuming project instead:
+Before the repo is pushed (or while it is private), use a local checkout from
+the consuming project instead:
 
 ```bash
 go mod edit -replace github.com/catstackdev/apiresponse=../apiresponse
@@ -20,19 +20,136 @@ go mod edit -replace github.com/catstackdev/apiresponse=../apiresponse
 The HTTP status code says success or failure; the body never repeats it.
 
 ```jsonc
-// success
-{ "data": { "id": 1, "name": "Ada" } }
+// Success
+{
+  "data": {
+    "id": 1,
+    "name": "Ada"
+  }
+}
 
-// list (cursor)
-{ "data": [], "pagination": { "limit": 20, "has_more": true, "next_cursor": "abc" } }
+// List (cursor pagination)
+{
+  "data": [],
+  "pagination": {
+    "limit": 20,
+    "has_more": true,
+    "next_cursor": "abc"
+  }
+}
 
-// list (offset)
-{ "data": [], "pagination": { "limit": 10, "has_more": false, "page": 1, "total": 0 } }
+// List (offset pagination)
+{
+  "data": [],
+  "pagination": {
+    "limit": 10,
+    "has_more": false,
+    "page": 1,
+    "total": 0
+  }
+}
 
-// error
-{ "error": { "code": "validation_failed", "message": "validation failed",
-             "details": [{ "field": "email", "message": "must be valid" }],
-             "request_id": "r-123" } }
+// Error
+{
+  "error": {
+    "code": "validation_failed",
+    "message": "validation failed",
+    "details": [
+      {
+        "field": "email",
+        "message": "must be valid"
+      }
+    ],
+    "request_id": "r-123"
+  }
+}
+```
+
+## For API consumers (frontend, mobile, other services)
+
+Works the same from TypeScript, Go, or anything that reads JSON.
+
+**How to read a response**
+
+1. Look at the HTTP status first. 2xx/3xx is success, 4xx/5xx is failure.
+2. On success, read `data` (and `pagination` for lists). On failure, read
+   `error`. The two never appear together, and a failure never has `data`.
+3. Branch on `error.code`, never on `error.message`. Codes are stable; messages
+   are for humans and may change or be translated.
+
+**Error codes**
+
+| `code`                   | HTTP | Meaning                         | What the client should do                  |
+| ------------------------ | ---- | ------------------------------- | ------------------------------------------ |
+| `bad_request`            | 400  | Malformed request               | Fix the request; do not retry as is        |
+| `unauthorized`           | 401  | Missing or invalid credentials  | Log in or refresh the token, then retry    |
+| `forbidden`              | 403  | Authenticated but not allowed   | Show "no permission"; do not retry         |
+| `not_found`              | 404  | Resource does not exist         | Show not-found state                       |
+| `method_not_allowed`     | 405  | Wrong HTTP method               | Client bug; fix the call                   |
+| `conflict`               | 409  | State conflict (e.g. duplicate) | Reload and let the user resolve            |
+| `payload_too_large`      | 413  | Body over the size limit        | Send less data                             |
+| `unsupported_media_type` | 415  | Wrong `Content-Type`            | Send `application/json`                    |
+| `validation_failed`      | 422  | Field errors in `details`       | Show each `details[].message` at its field |
+| `rate_limited`           | 429  | Too many requests               | Back off, then retry                       |
+| `internal_error`         | 500  | Server bug                      | Show generic error; retry is optional      |
+| `service_unavailable`    | 503  | Temporarily down                | Retry with backoff                         |
+| `deadline_exceeded`      | 504  | Server timed out                | Retry with backoff                         |
+
+Your own services can add codes with `New(status, "my_code", msg)`. Document
+them for your clients alongside this table.
+
+**Things worth knowing**
+
+- `details` appears only on `validation_failed`. `details[].field` may be empty
+  when the problem is not tied to one field.
+- `request_id`, when present, is what to quote in a bug report so the server
+  logs can be found. Show it in "something went wrong" screens.
+- 5xx messages are deliberately generic (`internal server error`). Internal
+  causes are never sent to the client.
+- 204 and 304 responses have no body. Do not call `.json()` on them.
+- `data` can legitimately be `0`, `""` or `false`. Check for `null`/missing, not
+  falsiness. Lists are always `[]`, never `null`.
+- Cursor pagination: pass `next_cursor` back unchanged and stop when
+  `has_more` is `false`. Treat the cursor as opaque. Offset pagination returns
+  `page` and `total`.
+- Not every response comes from this library. A proxy, gateway or router can
+  return plain text or HTML (for example a 502 from a load balancer). Check
+  `Content-Type: application/json` before parsing, and fall back to the status
+  code.
+- Field names are `snake_case` (`has_more`, `next_cursor`, `request_id`).
+
+**TypeScript types**
+
+```ts
+type Pagination = {
+  limit: number;
+  has_more: boolean;
+  next_cursor?: string; // cursor style
+  page?: number; // offset style
+  total?: number; // offset style
+};
+
+type Success<T> = { data: T; pagination?: Pagination };
+
+type ApiError = {
+  code: string; // switch on this
+  message: string;
+  details?: { field?: string; message: string }[];
+  request_id?: string;
+};
+
+type Failure = { error: ApiError };
+```
+
+**Go client**
+
+```go
+var env struct {
+    Data  json.RawMessage        `json:"data"`
+    Error *apiresponse.ErrorBody `json:"error"`
+}
+if err := json.NewDecoder(resp.Body).Decode(&env); err != nil { /* not an envelope */ }
+if env.Error != nil && env.Error.Code == apiresponse.CodeNotFound { /* ... */ }
 ```
 
 ## Quick start (net/http)
@@ -53,14 +170,14 @@ http.ListenAndServe(":8080", apiresponse.Recover(mux))
 
 ### Building blocks
 
-| Need            | Use                                                                                                                                                 |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Single item     | `OK(v)`                                                                                                                                             |
-| List            | `List(items, CursorPage(limit, next))` or `OffsetPage(page, limit, total)`                                                                          |
-| No content      | `Write(w, 204, nil)`                                                                                                                                |
+| Need            | Use                                                                                                                                                                                                                                                                |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Single item     | `OK(v)`                                                                                                                                                                                                                                                            |
+| List            | `List(items, CursorPage(limit, next))` or `OffsetPage(page, limit, total)`                                                                                                                                                                                         |
+| No content      | `Write(w, 204, nil)`                                                                                                                                                                                                                                               |
 | Errors          | `BadRequest`, `Unauthorized`, `Forbidden`, `NotFound`, `Conflict`, `Validation(details...)`, `RateLimited`, `Internal`, `MethodNotAllowed`, `UnsupportedMediaType`, `PayloadTooLarge`, `ServiceUnavailable`, `DeadlineExceeded` (504), or `New(status, code, msg)` |
-| Enrich an error | `.WithDetails(...)`, `.WithRequestID(id)`, `.WithCause(err)`, `.WithStatus(n)` (each returns a copy)                                                |
-| Any error       | `WriteError(w, err)`                                                                                                                                |
+| Enrich an error | `.WithDetails(...)`, `.WithRequestID(id)`, `.WithCause(err)`, `.WithStatus(n)` (each returns a copy)                                                                                                                                                               |
+| Any error       | `WriteError(w, err)`                                                                                                                                                                                                                                               |
 
 `*ErrorBody` implements `error`, so handlers can return it directly. Code
 constants (`CodeNotFound`, `CodeValidation`, ...) are what clients should switch
