@@ -43,9 +43,13 @@ deliberately live in the same package as responses because `WriteError`,
   413, 415) ready for `Handler`.
 - `recover.go`: `Writer.Recover` panic middleware (re-panics
   `http.ErrAbortHandler`).
-- `write.go`: package-level `Write`, `WriteError`, `Handler`, `Recover`
-  delegating to a default `Writer`. No global mutable state; customization goes
-  through `NewWriter`.
+- `tracker.go`: `trackingWriter`, the `ResponseWriter` wrapper used by `Handler`
+  and `Recover` to know whether a response already started. It must keep
+  forwarding `Flush`/`Hijack` and `Unwrap` (websocket upgraders assert
+  `http.Hijacker`).
+- `write.go`: package-level `Write`, `WriteError`, `Handler`, `Recover`,
+  `NotFoundHandler`, `MethodNotAllowedHandler` delegating to a default `Writer`.
+  No global mutable state; customization goes through `NewWriter`.
 
 Behaviors that span files and are easy to break:
 
@@ -73,6 +77,11 @@ Behaviors that span files and are easy to break:
   types are 415.
 - **`*ErrorBody` methods are nil-safe** (`Error` is `<nil>`, `HTTPStatus` 500,
   `With*` on nil yield a generic internal error).
+- **No second envelope after output started.** `Handler` and `Recover` log the
+  late error/panic (via `Writer.prepare`) but do not write. 1xx other than 101
+  do not count as started.
+- **`Detail.Code`** is an optional machine-readable reason (`omitempty`).
+  `MethodNotAllowedHandler` sets `Allow` itself before returning the error.
 - **`With*` methods clone `Details`** (via `clone()`), and `Validation` /
   `WithDetails` copy the caller's slice, so copies never share it.
 - **`Writer.resolve` skips mappers for a nil error** (generic 500), so mappers

@@ -2,6 +2,7 @@ package apiresponse_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -231,5 +232,16 @@ func TestErrorBody_NilReceiverIsSafe(t *testing.T) {
 		if c == nil || c.Code != apiresponse.CodeInternal {
 			t.Errorf("%s on nil: got %+v, want a generic internal error", name, c)
 		}
+	}
+}
+
+func TestDetail_CodeIsOptionalAndSerialized(t *testing.T) {
+	with, _ := json.Marshal(apiresponse.Detail{Field: "email", Code: "required", Message: "email is required"})
+	if string(with) != `{"field":"email","code":"required","message":"email is required"}` {
+		t.Fatalf("got %s", with)
+	}
+	without, _ := json.Marshal(apiresponse.Detail{Message: "bad"})
+	if string(without) != `{"message":"bad"}` {
+		t.Fatalf("got %s", without)
 	}
 }

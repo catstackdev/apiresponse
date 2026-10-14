@@ -26,6 +26,15 @@ func Recover(next http.Handler) http.Handler {
 	return defaultWriter.Recover(next)
 }
 
+// NotFoundHandler is [Writer.NotFoundHandler] using the default Writer.
+func NotFoundHandler() http.HandlerFunc { return defaultWriter.NotFoundHandler() }
+
+// MethodNotAllowedHandler is [Writer.MethodNotAllowedHandler] using the default
+// Writer.
+func MethodNotAllowedHandler(allow ...string) http.HandlerFunc {
+	return defaultWriter.MethodNotAllowedHandler(allow...)
+}
+
 var internalBody = []byte(`{"error":{"code":"internal_error","message":"internal server error"}}`)
 
 func writeRaw(w http.ResponseWriter, status int, body []byte) error {

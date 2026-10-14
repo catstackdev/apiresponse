@@ -1,15 +1,18 @@
 package apiresponse_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/catstackdev/apiresponse"
 )
@@ -271,5 +274,117 @@ func TestCustomLogger_StillSeesContextCanceled(t *testing.T) {
 	_ = wr.WriteError(httptest.NewRecorder(), nil, context.Canceled)
 	if len(calls) != 1 {
 		t.Fatalf("custom logger calls = %d, want 1", len(calls))
+	}
+}
+
+func TestHandler_DoesNotAppendEnvelopeAfterBody(t *testing.T) {
+	var calls []logCall
+	wr := newTestWriter(&calls)
+	h := wr.Handler(func(w http.ResponseWriter, r *http.Request) error {
+		_ = apiresponse.Write(w, http.StatusOK, apiresponse.OK("partial"))
+		return errors.New("late failure")
+	})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if strings.Contains(rec.Body.String(), "error") {
+		t.Fatalf("error envelope appended: %s", rec.Body)
+	}
+	if rec.Code != http.StatusOK || len(calls) != 1 {
+		t.Fatalf("status = %d, log calls = %d; want 200 and the error logged once", rec.Code, len(calls))
+	}
+}
+
+func TestHandler_InterimStatusDoesNotCountAsWritten(t *testing.T) {
+	wr := apiresponse.NewWriter(apiresponse.WithLogger(nil))
+	h := wr.Handler(func(w http.ResponseWriter, r *http.Request) error {
+		w.WriteHeader(http.StatusEarlyHints)
+		return apiresponse.NotFound("gone")
+	})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	// The recorder keeps only the first status, so assert on the envelope: an
+	// interim 103 must not make Handler think the final response already went out.
+	if !strings.Contains(rec.Body.String(), `"code":"not_found"`) {
+		t.Fatalf("envelope not written after an interim status: %q", rec.Body)
+	}
+}
+
+func TestRecover_DoesNotAppendEnvelopeAfterBody(t *testing.T) {
+	wr := apiresponse.NewWriter(apiresponse.WithLogger(nil))
+	h := wr.Recover(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("partial"))
+		panic("late")
+	}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if rec.Body.String() != "partial" {
+		t.Fatalf("body = %q, want only the partial output", rec.Body)
+	}
+}
+
+type hijackRecorder struct {
+	*httptest.ResponseRecorder
+	hijacked bool
+}
+
+func (h *hijackRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h.hijacked = true
+	return nil, nil, nil
+}
+
+func TestWrappedWriterKeepsFlushAndHijack(t *testing.T) {
+	rec := &hijackRecorder{ResponseRecorder: httptest.NewRecorder()}
+	h := apiresponse.Recover(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := w.(http.Flusher); !ok {
+			t.Error("wrapped writer lost http.Flusher")
+		}
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Fatal("wrapped writer lost http.Hijacker")
+		}
+		_, _, _ = hj.Hijack()
+	}))
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if !rec.hijacked {
+		t.Fatal("Hijack was not forwarded to the underlying writer")
+	}
+}
+
+func TestNotFoundAndMethodNotAllowedHandlers(t *testing.T) {
+	rec := httptest.NewRecorder()
+	apiresponse.NotFoundHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/nope", nil))
+	if rec.Code != 404 || !strings.Contains(rec.Body.String(), `"code":"not_found"`) {
+		t.Fatalf("404 handler: %d %s", rec.Code, rec.Body)
+	}
+
+	rec = httptest.NewRecorder()
+	apiresponse.MethodNotAllowedHandler("GET", "POST").ServeHTTP(rec, httptest.NewRequest("DELETE", "/", nil))
+	if rec.Code != 405 || rec.Header().Get("Allow") != "GET, POST" ||
+		!strings.Contains(rec.Body.String(), `"code":"method_not_allowed"`) {
+		t.Fatalf("405 handler: %d allow=%q %s", rec.Code, rec.Header().Get("Allow"), rec.Body)
+	}
+
+	rec = httptest.NewRecorder()
+	apiresponse.MethodNotAllowedHandler().ServeHTTP(rec, httptest.NewRequest("DELETE", "/", nil))
+	if _, ok := rec.Header()["Allow"]; ok {
+		t.Fatal("no methods given, Allow must not be set")
+	}
+}
+
+func TestWrappedWriter_FlushCountsAsWrittenAndUnwraps(t *testing.T) {
+	wr := apiresponse.NewWriter(apiresponse.WithLogger(nil))
+	rec := httptest.NewRecorder()
+	h := wr.Handler(func(w http.ResponseWriter, r *http.Request) error {
+		w.(http.Flusher).Flush()
+		// ResponseController reaches the underlying writer through Unwrap; the
+		// recorder has no deadlines, so ErrNotSupported proves we got there.
+		if err := http.NewResponseController(w).SetWriteDeadline(time.Time{}); !errors.Is(err, http.ErrNotSupported) {
+			t.Errorf("SetWriteDeadline err = %v, want ErrNotSupported from the wrapped writer", err)
+		}
+		return errors.New("after flush")
+	})
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if !rec.Flushed || strings.Contains(rec.Body.String(), "error") {
+		t.Fatalf("flushed = %v, body = %q; want flushed with no envelope appended", rec.Flushed, rec.Body)
 	}
 }

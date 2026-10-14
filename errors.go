@@ -28,6 +28,7 @@ const (
 // Detail describes one field-level problem, typically for validation errors.
 type Detail struct {
 	Field   string `json:"field,omitempty"`
+	Code    string `json:"code,omitempty"` // stable machine-readable reason, e.g. "required"
 	Message string `json:"message"`
 }
 

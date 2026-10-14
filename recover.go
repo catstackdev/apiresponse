@@ -9,11 +9,12 @@ import (
 // Recover is middleware that turns a panic in next into the standard 500 error
 // envelope, logging the panic value and stack through the Logger. It re-panics
 // http.ErrAbortHandler, as net/http expects. If the handler already started
-// writing the response, the status cannot be changed. The recovered value is
+// writing the response, the panic is logged but no envelope is appended. The recovered value is
 // not unwrapped: even if the panic value is an error, errors.Is/As and mappers
 // see only the opaque panic, which always becomes a generic 500.
 func (wr *Writer) Recover(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tw := &trackingWriter{ResponseWriter: w}
 		defer func() {
 			v := recover()
 			if v == nil {
@@ -22,9 +23,14 @@ func (wr *Writer) Recover(next http.Handler) http.Handler {
 			if v == http.ErrAbortHandler {
 				panic(v)
 			}
-			_ = wr.WriteError(w, r, &panicError{value: v, stack: debug.Stack()})
+			perr := &panicError{value: v, stack: debug.Stack()}
+			if tw.wrote {
+				wr.prepare(r, perr) // too late to change the response; just log
+				return
+			}
+			_ = wr.WriteError(w, r, perr)
 		}()
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(tw, r)
 	})
 }
 

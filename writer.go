@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 )
 
 // ErrorMapper converts a domain error into an *ErrorBody. Returning nil means
@@ -95,6 +96,14 @@ func (wr *Writer) Write(w http.ResponseWriter, status int, v any) error {
 // consulted, so they never see nil). The returned error is the
 // write/marshal failure, not err itself.
 func (wr *Writer) WriteError(w http.ResponseWriter, r *http.Request, err error) error {
+	eb := wr.prepare(r, err)
+	return wr.Write(w, eb.HTTPStatus(), ErrorResponse{Error: eb})
+}
+
+// prepare resolves err, fills in the request ID and logs. It is shared by
+// WriteError and by the paths that must log but cannot write (the response has
+// already started).
+func (wr *Writer) prepare(r *http.Request, err error) *ErrorBody {
 	eb := wr.resolve(err)
 	if eb.RequestID == "" && wr.requestID != nil && r != nil {
 		if id := wr.requestID(r); id != "" {
@@ -104,20 +113,49 @@ func (wr *Writer) WriteError(w http.ResponseWriter, r *http.Request, err error) 
 	if eb.HTTPStatus() >= http.StatusInternalServerError && wr.logger != nil {
 		wr.logger(r, err, eb)
 	}
-	return wr.Write(w, eb.HTTPStatus(), ErrorResponse{Error: eb})
+	return eb
 }
 
 // Handler adapts a HandlerFunc to http.HandlerFunc, writing any returned error
 // with WriteError. The result works with net/http, chi, and anything else that
-// accepts an http.Handler. Return an error only before writing a response: if fn
-// has already written a body, the error envelope is written after it. Headers
-// set before returning an error (e.g. Retry-After on a 429) are kept.
+// accepts an http.Handler. If fn already started the response, the returned
+// error cannot be sent: it is passed to the Logger (when its status qualifies)
+// and no second envelope is appended. Headers set before returning an error
+// (e.g. Retry-After on a 429) are kept.
 func (wr *Writer) Handler(fn HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if err := fn(w, r); err != nil {
-			_ = wr.WriteError(w, r, err)
+		tw := &trackingWriter{ResponseWriter: w}
+		err := fn(tw, r)
+		if err == nil {
+			return
 		}
+		if tw.wrote {
+			wr.prepare(r, err)
+			return
+		}
+		_ = wr.WriteError(w, r, err)
 	}
+}
+
+// NotFoundHandler answers with a 404 error envelope. Register it where your
+// router lets you replace the default plain-text 404, e.g. chi's r.NotFound or
+// a catch-all "/" pattern on net/http.
+func (wr *Writer) NotFoundHandler() http.HandlerFunc {
+	return wr.Handler(func(http.ResponseWriter, *http.Request) error {
+		return NotFound("resource not found")
+	})
+}
+
+// MethodNotAllowedHandler answers with a 405 error envelope and an Allow header
+// listing the given methods, e.g. MethodNotAllowedHandler("GET", "POST").
+func (wr *Writer) MethodNotAllowedHandler(allow ...string) http.HandlerFunc {
+	allowed := strings.Join(allow, ", ")
+	return wr.Handler(func(w http.ResponseWriter, _ *http.Request) error {
+		if allowed != "" {
+			w.Header().Set("Allow", allowed)
+		}
+		return MethodNotAllowed("method not allowed")
+	})
 }
 
 func (wr *Writer) resolve(err error) *ErrorBody {

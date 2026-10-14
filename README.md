@@ -71,6 +71,7 @@ The HTTP status code says success or failure; the body never repeats it.
     "details": [
       {
         "field": "email",
+        "code": "invalid_format",
         "message": "must be valid"
       }
     ],
@@ -195,6 +196,7 @@ http.ListenAndServe(":8080", apiresponse.Recover(mux))
 | List + totals   | `ListWithSummary(items, page, summary)`; `summary` is any struct, omitted when nil                                                                                                                                                                                 |
 | Read a body     | `Decode[T](w, r)` or `DecodeLimit[T](w, r, maxBytes)`: 1 MiB default limit, unknown fields rejected, `null` body rejected, limit <= 0 means default; returns 400/413/415 as `*ErrorBody` (non-field decode errors get a generic message)                           |
 | Enrich an error | `.WithDetails(...)`, `.WithRequestID(id)`, `.WithCause(err)`, `.WithStatus(n)` (each returns a copy)                                                                                                                                                               |
+| JSON 404 / 405  | `NotFoundHandler()`, `MethodNotAllowedHandler("GET", "POST")` (sets `Allow`); register them as your router's not-found / method-not-allowed handlers                                                                                                               |
 | Any error       | `WriteError(w, err)`                                                                                                                                                                                                                                               |
 
 `*ErrorBody` implements `error`, so handlers can return it directly. Code
@@ -290,10 +292,14 @@ in registration order, then a generic 500.
   true after `With*` copies, and `ErrUserNotFound` does not match
   `ErrOrderNotFound` even though both are `not_found`.
   `apiresponse.IsCode(err, apiresponse.CodeNotFound)` checks just the code.
-- `Handler` writes the error envelope after whatever `fn` already wrote, so
-  return an error only before writing a response. Headers set before returning
-  an error are kept; for a 429, set `Retry-After` yourself:
+- If `fn` (in `Handler`) or the wrapped handler (in `Recover`) already started
+  the response, the late error or panic is logged but no second envelope is
+  appended. Still, return errors before writing when you can. Headers set before
+  returning an error are kept; for a 429, set `Retry-After` yourself:
   `w.Header().Set("Retry-After", "30"); return apiresponse.RateLimited("slow down")`.
+- `Handler` and `Recover` wrap the `ResponseWriter` to track this. The wrapper
+  forwards `Flush` and `Hijack` and exposes `Unwrap` for
+  `http.ResponseController`.
 - `With*` methods copy, so package-level sentinel errors are safe:
   `var ErrUserNotFound = apiresponse.NotFound("user not found")`.
 
