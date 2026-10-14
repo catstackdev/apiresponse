@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"strings"
 )
 
 // DefaultMaxBodyBytes is the request body limit used by [Decode].
@@ -59,7 +60,12 @@ func decodeError(err error) *ErrorBody {
 	case errors.As(err, &syntaxErr), errors.Is(err, io.ErrUnexpectedEOF):
 		return BadRequest("malformed JSON").WithCause(err)
 	default:
-		// Includes unknown fields, whose message names the field.
-		return BadRequest(err.Error()).WithCause(err)
+		// encoding/json has no typed error for unknown fields; the message only
+		// echoes the client's own field name, so it is safe to expose. Anything
+		// else (e.g. a read error) gets a fixed message to avoid leaking internals.
+		if msg := err.Error(); strings.HasPrefix(msg, "json: unknown field ") {
+			return BadRequest(msg).WithCause(err)
+		}
+		return BadRequest("invalid request body").WithCause(err)
 	}
 }

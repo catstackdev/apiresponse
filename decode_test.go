@@ -1,10 +1,12 @@
 package apiresponse_test
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/catstackdev/apiresponse"
 )
@@ -64,6 +66,25 @@ func TestDecode(t *testing.T) {
 				t.Fatalf("status = %d, want %d", got, tc.wantStatus)
 			}
 		})
+	}
+}
+
+func TestDecode_UnknownFieldNamesField(t *testing.T) {
+	_, err := decodeReq(t, "application/json", `{"nope":1}`, 0)
+	if got := apiresponse.FromError(err).Message; !strings.Contains(got, `"nope"`) {
+		t.Fatalf("message = %q, want it to name the unknown field", got)
+	}
+}
+
+func TestDecode_ReadErrorDoesNotLeak(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/", iotest.ErrReader(errors.New("secret internal detail")))
+	r.Header.Set("Content-Type", "application/json")
+	_, err := apiresponse.Decode[createUser](httptest.NewRecorder(), r)
+	if !apiresponse.IsCode(err, apiresponse.CodeBadRequest) {
+		t.Fatalf("err = %v, want bad request", err)
+	}
+	if got := apiresponse.FromError(err).Message; strings.Contains(got, "secret") {
+		t.Fatalf("message %q leaks the underlying read error", got)
 	}
 }
 
