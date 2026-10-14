@@ -41,6 +41,7 @@ func TestDecode(t *testing.T) {
 		{"ok without content type", "", `{"name":"Ada"}`, 0, "", 0},
 		{"wrong content type", "text/plain", `{}`, 0, apiresponse.CodeUnsupportedMediaType, 415},
 		{"bad content type", "///", `{}`, 0, apiresponse.CodeUnsupportedMediaType, 415},
+		{"null body", "application/json", ` null `, 0, apiresponse.CodeBadRequest, 400},
 		{"empty body", "application/json", ``, 0, apiresponse.CodeBadRequest, 400},
 		{"malformed", "application/json", `{"name":`, 0, apiresponse.CodeBadRequest, 400},
 		{"syntax error", "application/json", `{name}`, 0, apiresponse.CodeBadRequest, 400},
@@ -93,5 +94,14 @@ func TestDecode_ReturnsValue(t *testing.T) {
 	got, err := decodeReq(t, "application/json", `{"name":"Ada","age":36}`, 0)
 	if err != nil || got != (createUser{Name: "Ada", Age: 36}) {
 		t.Fatalf("got %+v, err %v", got, err)
+	}
+}
+
+func TestDecodeLimit_NonPositiveFallsBackToDefault(t *testing.T) {
+	for _, limit := range []int64{0, -1} {
+		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"Ada"}`))
+		if _, err := apiresponse.DecodeLimit[createUser](httptest.NewRecorder(), r, limit); err != nil {
+			t.Errorf("limit %d: unexpected error: %v", limit, err)
+		}
 	}
 }

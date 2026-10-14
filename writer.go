@@ -86,8 +86,8 @@ func (wr *Writer) Write(w http.ResponseWriter, status int, v any) error {
 // WriteError resolves err to an *ErrorBody and writes it as an error envelope.
 // Resolution order: an *ErrorBody already in the chain, then registered
 // mappers, then a generic 500. r may be nil; it is only passed to the Logger.
-// A nil err is treated like any unknown error: a generic 500 (mappers are
-// still consulted, so they must tolerate nil). The returned error is the
+// A nil err is treated like any unknown error: a generic 500 (mappers are not
+// consulted, so they never see nil). The returned error is the
 // write/marshal failure, not err itself.
 func (wr *Writer) WriteError(w http.ResponseWriter, r *http.Request, err error) error {
 	eb := wr.resolve(err)
@@ -118,6 +118,9 @@ func (wr *Writer) Handler(fn HandlerFunc) http.HandlerFunc {
 func (wr *Writer) resolve(err error) *ErrorBody {
 	if eb := findErrorBody(err); eb != nil {
 		return eb
+	}
+	if err == nil {
+		return FromError(nil)
 	}
 	for _, m := range wr.mappers {
 		if mapped := m(err); mapped != nil {

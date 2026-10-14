@@ -33,7 +33,9 @@ type Detail struct {
 
 // ErrorBody is the error payload. It implements error, so handlers can return
 // it directly. Its With* methods return copies and never mutate the receiver,
-// which makes it safe to keep package-level sentinel values.
+// which makes it safe to keep package-level sentinel values. Details is an
+// exported field: copies from With* do not share it, but do not mutate it in
+// place on a value other code may hold.
 type ErrorBody struct {
 	Code      string   `json:"code"`
 	Message   string   `json:"message"`
@@ -135,33 +137,41 @@ func (e *ErrorBody) HTTPStatus() int {
 	return e.status
 }
 
+// clone returns a copy that shares no mutable state with e, so mutating one
+// copy's Details never affects the original (or a package-level sentinel).
+func (e *ErrorBody) clone() *ErrorBody {
+	c := *e
+	c.Details = slices.Clone(e.Details)
+	return &c
+}
+
 // WithCause attaches an underlying error for logging and errors.Is/As.
 // The cause is never serialized to the client.
 func (e *ErrorBody) WithCause(err error) *ErrorBody {
-	c := *e
+	c := e.clone()
 	c.cause = err
-	return &c
+	return c
 }
 
 // WithDetails returns a copy with the given details.
 func (e *ErrorBody) WithDetails(details ...Detail) *ErrorBody {
-	c := *e
+	c := e.clone()
 	c.Details = slices.Clone(details)
-	return &c
+	return c
 }
 
 // WithRequestID returns a copy tagged with a request ID.
 func (e *ErrorBody) WithRequestID(id string) *ErrorBody {
-	c := *e
+	c := e.clone()
 	c.RequestID = id
-	return &c
+	return c
 }
 
 // WithStatus returns a copy with a different HTTP status.
 func (e *ErrorBody) WithStatus(status int) *ErrorBody {
-	c := *e
+	c := e.clone()
 	c.status = status
-	return &c
+	return c
 }
 
 // FromError converts any error into an *ErrorBody. If err already wraps an

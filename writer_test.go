@@ -210,3 +210,17 @@ func TestRecover_DefaultLoggerHandlesPanicStack(t *testing.T) {
 		t.Fatalf("status = %d, want 500", rec.Code)
 	}
 }
+
+func TestWriter_NilErrorSkipsMappers(t *testing.T) {
+	wr := apiresponse.NewWriter(
+		apiresponse.WithLogger(nil),
+		apiresponse.WithErrorMapper(func(err error) *apiresponse.ErrorBody {
+			return apiresponse.NotFound(err.Error()) // panics on nil
+		}),
+	)
+	rec := httptest.NewRecorder()
+	_ = wr.WriteError(rec, nil, nil)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+}

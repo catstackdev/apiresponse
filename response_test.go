@@ -2,6 +2,7 @@ package apiresponse_test
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 
@@ -48,6 +49,8 @@ func TestOffsetPage_HasMore(t *testing.T) {
 		{1, 10, 25, true},
 		{3, 10, 25, false},
 		{2, 10, 20, false},
+		{1, 10, math.MaxInt64, true},
+		{1, 10, math.MaxInt64 - 5, true},
 	}
 	for _, c := range cases {
 		if got := apiresponse.OffsetPage(c.page, c.limit, c.total).HasMore; got != c.want {

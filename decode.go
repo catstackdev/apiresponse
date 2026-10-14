@@ -1,6 +1,7 @@
 package apiresponse
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,12 +18,13 @@ const DefaultMaxBodyBytes int64 = 1 << 20
 // [DefaultMaxBodyBytes], unknown fields are rejected, and exactly one JSON value
 // is allowed. Failures are returned as *ErrorBody, ready for [Handler]:
 // 415 for a non-JSON Content-Type, 413 for an oversized body, 400 for anything
-// malformed. A missing Content-Type is accepted.
+// malformed, including a literal null body. A missing Content-Type is accepted.
 func Decode[T any](w http.ResponseWriter, r *http.Request) (T, error) {
 	return DecodeLimit[T](w, r, DefaultMaxBodyBytes)
 }
 
-// DecodeLimit is [Decode] with a custom body limit in bytes.
+// DecodeLimit is [Decode] with a custom body limit in bytes. A limit of zero or
+// less falls back to [DefaultMaxBodyBytes].
 func DecodeLimit[T any](w http.ResponseWriter, r *http.Request, maxBytes int64) (T, error) {
 	var v T
 	if ct := r.Header.Get("Content-Type"); ct != "" {
@@ -30,7 +32,17 @@ func DecodeLimit[T any](w http.ResponseWriter, r *http.Request, maxBytes int64) 
 			return v, UnsupportedMediaType("Content-Type must be application/json")
 		}
 	}
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBytes))
+	if maxBytes <= 0 {
+		maxBytes = DefaultMaxBodyBytes
+	}
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBytes))
+	if err != nil {
+		return v, decodeError(err)
+	}
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		return v, BadRequest("request body must not be null")
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&v); err != nil {
 		return v, decodeError(err)

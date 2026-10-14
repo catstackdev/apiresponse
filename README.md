@@ -193,7 +193,7 @@ http.ListenAndServe(":8080", apiresponse.Recover(mux))
 | No content      | `Write(w, 204, nil)`                                                                                                                                                                                                                                               |
 | Errors          | `BadRequest`, `Unauthorized`, `Forbidden`, `NotFound`, `Conflict`, `Validation(details...)`, `RateLimited`, `Internal`, `MethodNotAllowed`, `UnsupportedMediaType`, `PayloadTooLarge`, `ServiceUnavailable`, `DeadlineExceeded` (504), or `New(status, code, msg)` |
 | List + totals   | `ListWithSummary(items, page, summary)`; `summary` is any struct, omitted when nil                                                                                                                                                                                 |
-| Read a body     | `Decode[T](w, r)` or `DecodeLimit[T](w, r, maxBytes)`: 1 MiB default limit, unknown fields rejected; returns 400/413/415 as `*ErrorBody` (non-field decode errors get a generic message)                                                                                                                           |
+| Read a body     | `Decode[T](w, r)` or `DecodeLimit[T](w, r, maxBytes)`: 1 MiB default limit, unknown fields rejected, `null` body rejected, limit <= 0 means default; returns 400/413/415 as `*ErrorBody` (non-field decode errors get a generic message)                                                                                                                           |
 | Enrich an error | `.WithDetails(...)`, `.WithRequestID(id)`, `.WithCause(err)`, `.WithStatus(n)` (each returns a copy)                                                                                                                                                               |
 | Any error       | `WriteError(w, err)`                                                                                                                                                                                                                                               |
 
@@ -224,8 +224,10 @@ router).
 
 ## Custom error mapping, logging, panics
 
-Package-level functions use a default `Writer`. Build your own to map domain
-errors and control logging:
+Package-level functions use a default `Writer`. Build your own in production
+to map domain errors and control logging; only a `Writer` can add request IDs
+(`WithRequestIDFunc`), and the package-level `WriteError(w, err)` has no
+request, so its logs carry no request context:
 
 ```go
 w := apiresponse.NewWriter(

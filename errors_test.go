@@ -188,3 +188,31 @@ func TestDetails_AreCopied(t *testing.T) {
 		t.Fatal("caller mutation leaked into the error")
 	}
 }
+
+func TestWith_DoesNotShareDetails(t *testing.T) {
+	base := apiresponse.Validation(apiresponse.Detail{Field: "a", Message: "bad"})
+	for name, c := range map[string]*apiresponse.ErrorBody{
+		"WithCause":     base.WithCause(errors.New("x")),
+		"WithRequestID": base.WithRequestID("id"),
+		"WithStatus":    base.WithStatus(400),
+	} {
+		c.Details[0].Message = "mutated"
+		if base.Details[0].Message != "bad" {
+			t.Errorf("%s: mutating the copy changed the original", name)
+		}
+	}
+}
+
+func TestWith_PreservesMessage(t *testing.T) {
+	base := apiresponse.NotFound("user not found")
+	for name, c := range map[string]*apiresponse.ErrorBody{
+		"WithCause":     base.WithCause(errors.New("x")),
+		"WithDetails":   base.WithDetails(apiresponse.Detail{Field: "f", Message: "m"}),
+		"WithRequestID": base.WithRequestID("id"),
+		"WithStatus":    base.WithStatus(410),
+	} {
+		if c.Message != base.Message || !errors.Is(c, base) {
+			t.Errorf("%s: Message changed or errors.Is(copy, base) is false", name)
+		}
+	}
+}

@@ -56,8 +56,17 @@ func OffsetPage(page, limit int, total int64) Pagination {
 	total = max(total, 0)
 	return Pagination{
 		Limit:   limit,
-		HasMore: limit > 0 && int64(page) < (total+int64(limit)-1)/int64(limit),
+		HasMore: limit > 0 && int64(page) < pageCount(total, int64(limit)),
 		Page:    &page,
 		Total:   &total,
 	}
+}
+
+// pageCount is ceil(total/limit) written so it cannot overflow for huge totals.
+func pageCount(total, limit int64) int64 {
+	pages := total / limit
+	if total%limit != 0 {
+		pages++
+	}
+	return pages
 }
