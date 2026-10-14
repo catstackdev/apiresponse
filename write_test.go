@@ -116,5 +116,8 @@ func TestWrite_InvalidStatusYields500(t *testing.T) {
 		if rec.Code != http.StatusInternalServerError {
 			t.Fatalf("status %d: got %d, want 500", status, rec.Code)
 		}
+		if !strings.Contains(rec.Body.String(), "internal_error") {
+			t.Fatalf("status %d: body = %q, want the internal error envelope", status, rec.Body.String())
+		}
 	}
 }

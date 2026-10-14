@@ -105,3 +105,10 @@ func TestDecodeLimit_NonPositiveFallsBackToDefault(t *testing.T) {
 		}
 	}
 }
+
+func TestDecode_TopLevelMismatchHasNoEmptyFieldName(t *testing.T) {
+	_, err := decodeReq(t, "application/json", `"str"`, 0)
+	if got := apiresponse.FromError(err).Message; got != "invalid request body" {
+		t.Fatalf("message = %q, want the generic message", got)
+	}
+}
