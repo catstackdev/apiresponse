@@ -2,6 +2,7 @@ package apiresponse
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -52,7 +53,9 @@ func WithRequestIDFunc(fn func(r *http.Request) string) Option {
 	return func(wr *Writer) { wr.requestID = fn }
 }
 
-// NewWriter creates a Writer. By default 5xx errors are logged with slog.
+// NewWriter creates a Writer. By default 5xx errors are logged with slog
+// (including the request ID when WithRequestIDFunc is set), except
+// context.Canceled.
 func NewWriter(opts ...Option) *Writer {
 	wr := &Writer{logger: defaultLogger}
 	for _, opt := range opts {
@@ -135,8 +138,17 @@ func (wr *Writer) resolve(err error) *ErrorBody {
 	return FromError(err)
 }
 
+// defaultLogger logs a 5xx with slog. It skips context.Canceled: the client has
+// already gone, so it is not a server fault and would only add noise. A custom
+// Logger still sees every 5xx and can make its own call.
 func defaultLogger(r *http.Request, err error, eb *ErrorBody) {
+	if errors.Is(err, context.Canceled) {
+		return
+	}
 	attrs := []any{"code", eb.Code, "status", eb.HTTPStatus(), "error", err}
+	if eb.RequestID != "" {
+		attrs = append(attrs, "request_id", eb.RequestID)
+	}
 	if r != nil {
 		attrs = append(attrs, "method", r.Method, "path", r.URL.Path)
 	}

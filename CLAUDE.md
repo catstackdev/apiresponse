@@ -88,7 +88,8 @@ Behaviors that span files and are easy to break:
   unexported), so the stack is default-logger-only by design.
 - **5xx logging:** the Logger fires only for 5xx and receives the original error
   (mapped errors get it attached as cause). `r` may be nil when called via
-  package-level `WriteError`.
+  package-level `WriteError`. The default logger adds `request_id` when set and
+  skips `context.Canceled` (client gone); custom Loggers still see everything.
 - JSON is encoded with HTML escaping off and the trailing newline trimmed.
 - `Pagination` serves both cursor and offset styles; unused fields are
   `omitempty`.

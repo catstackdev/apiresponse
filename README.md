@@ -260,7 +260,9 @@ in registration order, then a generic 500.
 
 - **Logging:** only 5xx responses are logged (default: `slog`). The logger gets
   the original error, so the real cause is visible. `WithLogger(nil)` disables
-  it. `r` is nil when `WriteError` is called without a request.
+  it. `r` is nil when `WriteError` is called without a request. The default
+  logger includes `request_id` (when `WithRequestIDFunc` is set) and skips
+  `context.Canceled`, since the client is gone; a custom logger still sees it.
 - **Panics:** `Recover` returns the standard 500 envelope and logs the panic
   with its stack as a separate `stack` attribute (the error message is just
   `panic: <value>`). It re-panics `http.ErrAbortHandler`. If the handler already

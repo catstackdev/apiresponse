@@ -1,7 +1,10 @@
 package apiresponse_test
 
 import (
+	"bytes"
+	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -222,5 +225,51 @@ func TestWriter_NilErrorSkipsMappers(t *testing.T) {
 	_ = wr.WriteError(rec, nil, nil)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+}
+
+// captureSlog redirects the default slog logger for one test.
+func captureSlog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &buf
+}
+
+func TestDefaultLogger_IncludesRequestID(t *testing.T) {
+	buf := captureSlog(t)
+	wr := apiresponse.NewWriter(
+		apiresponse.WithRequestIDFunc(func(r *http.Request) string { return "req_42" }),
+	)
+	_ = wr.WriteError(httptest.NewRecorder(), httptest.NewRequest("GET", "/x", nil), errNoRows)
+	if got := buf.String(); !strings.Contains(got, "request_id=req_42") {
+		t.Fatalf("log = %q, want request_id", got)
+	}
+}
+
+func TestDefaultLogger_SkipsContextCanceled(t *testing.T) {
+	buf := captureSlog(t)
+	rec := httptest.NewRecorder()
+	_ = apiresponse.WriteError(rec, context.Canceled)
+	if buf.Len() != 0 {
+		t.Fatalf("logged a client cancel: %q", buf.String())
+	}
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	_ = apiresponse.WriteError(httptest.NewRecorder(), errNoRows)
+	if buf.Len() == 0 {
+		t.Fatal("a real 5xx must still be logged")
+	}
+}
+
+func TestCustomLogger_StillSeesContextCanceled(t *testing.T) {
+	var calls []logCall
+	wr := newTestWriter(&calls)
+	_ = wr.WriteError(httptest.NewRecorder(), nil, context.Canceled)
+	if len(calls) != 1 {
+		t.Fatalf("custom logger calls = %d, want 1", len(calls))
 	}
 }
