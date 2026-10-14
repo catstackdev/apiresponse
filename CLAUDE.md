@@ -65,8 +65,8 @@ Behaviors that span files and are easy to break:
   error (net/http would panic). Nothing logs it.
 - **`Decode` error messages never leak internals.** Only unknown-field errors
   (detected by the `json: unknown field ` prefix, since encoding/json has no
-  typed error) and per-field type errors echo client input; everything else is
-  a fixed message. A `null` body is a 400, `maxBytes <= 0` means the default
+  typed error) and per-field type errors echo client input; everything else is a
+  fixed message. A `null` body is a 400, `maxBytes <= 0` means the default
   limit, and a body read error is a 400.
 - **`With*` methods clone `Details`** (via `clone()`), and `Validation` /
   `WithDetails` copy the caller's slice, so copies never share it.
