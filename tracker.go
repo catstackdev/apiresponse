@@ -2,6 +2,8 @@ package apiresponse
 
 import (
 	"bufio"
+	"errors"
+	"io"
 	"net"
 	"net/http"
 )
@@ -17,11 +19,13 @@ type trackingWriter struct {
 }
 
 func (t *trackingWriter) WriteHeader(code int) {
+	// Mark after the call: net/http panics on an invalid code, and nothing has
+	// been sent then, so Recover must still be able to answer with a 500.
+	t.ResponseWriter.WriteHeader(code)
 	// 1xx (except 101) are interim responses; the final one is still to come.
 	if code < 100 || code >= 200 || code == http.StatusSwitchingProtocols {
 		t.wrote = true
 	}
-	t.ResponseWriter.WriteHeader(code)
 }
 
 func (t *trackingWriter) Write(b []byte) (int, error) {
@@ -29,14 +33,28 @@ func (t *trackingWriter) Write(b []byte) (int, error) {
 	return t.ResponseWriter.Write(b)
 }
 
-func (t *trackingWriter) Flush() {
+// ReadFrom keeps io.Copy, http.ServeContent and http.ServeFile on net/http's
+// sendfile path: io.Copy uses the wrapped writer's own ReadFrom when it has one.
+func (t *trackingWriter) ReadFrom(src io.Reader) (int64, error) {
 	t.wrote = true
-	_ = http.NewResponseController(t.ResponseWriter).Flush()
+	return io.Copy(t.ResponseWriter, src)
+}
+
+func (t *trackingWriter) Flush() {
+	// Only ErrNotSupported means nothing was sent: net/http commits the 200
+	// header before it flushes, so any other failure (client gone, write error)
+	// has already started the response.
+	if err := http.NewResponseController(t.ResponseWriter).Flush(); !errors.Is(err, http.ErrNotSupported) {
+		t.wrote = true
+	}
 }
 
 func (t *trackingWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	t.wrote = true
-	return http.NewResponseController(t.ResponseWriter).Hijack()
+	conn, rw, err := http.NewResponseController(t.ResponseWriter).Hijack()
+	if err == nil {
+		t.wrote = true // a failed hijack (e.g. HTTP/2) leaves the response untouched
+	}
+	return conn, rw, err
 }
 
 func (t *trackingWriter) Unwrap() http.ResponseWriter { return t.ResponseWriter }

@@ -116,3 +116,28 @@ func TestDecode_TopLevelMismatchHasNoEmptyFieldName(t *testing.T) {
 		t.Fatalf("message = %q, want the generic message", got)
 	}
 }
+
+func TestDecode_TooLargeAsksToCloseConnection(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"`+strings.Repeat("a", 100)+`"}`))
+	w := httptest.NewRecorder()
+	if _, err := apiresponse.DecodeLimit[createUser](w, r, 16); !apiresponse.IsCode(err, apiresponse.CodePayloadTooLarge) {
+		t.Fatalf("err = %v, want payload_too_large", err)
+	}
+	if got := w.Header().Get("Connection"); got != "close" {
+		t.Fatalf("Connection = %q, want close", got)
+	}
+}
+
+func TestDecode_TooLargeDoesNotSetConnectionCloseOnHTTP2(t *testing.T) {
+	// The HTTP/2 server treats "Connection: close" as "shut the connection down",
+	// which would drop every other stream for one oversized body.
+	r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(strings.Repeat("a", 100)))
+	r.ProtoMajor, r.ProtoMinor = 2, 0
+	w := httptest.NewRecorder()
+	if _, err := apiresponse.DecodeLimit[createUser](w, r, 16); !apiresponse.IsCode(err, apiresponse.CodePayloadTooLarge) {
+		t.Fatalf("err = %v, want payload_too_large", err)
+	}
+	if got := w.Header().Get("Connection"); got != "" {
+		t.Fatalf("Connection = %q, want unset on HTTP/2", got)
+	}
+}

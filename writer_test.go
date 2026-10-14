@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -371,6 +372,56 @@ func TestNotFoundAndMethodNotAllowedHandlers(t *testing.T) {
 	}
 }
 
+// readFromRecorder stands in for net/http's response, which implements
+// io.ReaderFrom (the sendfile path).
+type readFromRecorder struct {
+	*httptest.ResponseRecorder
+	readFromCalled bool
+}
+
+func (r *readFromRecorder) ReadFrom(src io.Reader) (int64, error) {
+	r.readFromCalled = true
+	return io.Copy(r.ResponseRecorder, src)
+}
+
+func TestWrappedWriter_ReadFromDelegatesToUnderlyingReadFrom(t *testing.T) {
+	wr := apiresponse.NewWriter(apiresponse.WithLogger(nil))
+	rec := &readFromRecorder{ResponseRecorder: httptest.NewRecorder()}
+	h := wr.Recover(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Hide WriterTo (strings.Reader has it); io.Copy prefers it over ReadFrom.
+		src := struct{ io.Reader }{strings.NewReader("file-bytes")}
+		if _, err := io.Copy(w, src); err != nil {
+			t.Errorf("io.Copy: %v", err)
+		}
+	}))
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if !rec.readFromCalled {
+		t.Fatal("io.Copy did not reach the underlying writer's ReadFrom; sendfile path lost")
+	}
+	if got := rec.Body.String(); got != "file-bytes" {
+		t.Fatalf("body = %q, want file-bytes", got)
+	}
+}
+
+func TestWrappedWriter_ReadFromCountsAsWritten(t *testing.T) {
+	wr := apiresponse.NewWriter(apiresponse.WithLogger(nil))
+	rec := httptest.NewRecorder()
+	h := wr.Handler(func(w http.ResponseWriter, r *http.Request) error {
+		rf, ok := w.(io.ReaderFrom)
+		if !ok {
+			t.Fatal("wrapped writer lost io.ReaderFrom")
+		}
+		if _, err := rf.ReadFrom(strings.NewReader("file-bytes")); err != nil {
+			t.Fatalf("ReadFrom: %v", err)
+		}
+		return errors.New("after copy")
+	})
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if got := rec.Body.String(); got != "file-bytes" {
+		t.Fatalf("body = %q; want only the copied bytes, no envelope appended", got)
+	}
+}
+
 func TestWrappedWriter_FlushCountsAsWrittenAndUnwraps(t *testing.T) {
 	wr := apiresponse.NewWriter(apiresponse.WithLogger(nil))
 	rec := httptest.NewRecorder()
@@ -386,5 +437,66 @@ func TestWrappedWriter_FlushCountsAsWrittenAndUnwraps(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
 	if !rec.Flushed || strings.Contains(rec.Body.String(), "error") {
 		t.Fatalf("flushed = %v, body = %q; want flushed with no envelope appended", rec.Flushed, rec.Body)
+	}
+}
+
+// bareWriter is a ResponseWriter with no Flush, Hijack or ReadFrom support.
+type bareWriter struct {
+	h    http.Header
+	code int
+	body bytes.Buffer
+}
+
+func (b *bareWriter) Header() http.Header         { return b.h }
+func (b *bareWriter) Write(p []byte) (int, error) { return b.body.Write(p) }
+func (b *bareWriter) WriteHeader(code int)        { b.code = code }
+
+func TestWrappedWriter_FailedFlushAndHijackStillAllowEnvelope(t *testing.T) {
+	wr := apiresponse.NewWriter(apiresponse.WithLogger(nil))
+	h := wr.Handler(func(w http.ResponseWriter, r *http.Request) error {
+		w.(http.Flusher).Flush()
+		if _, _, err := w.(http.Hijacker).Hijack(); err == nil {
+			t.Error("Hijack on a bare writer should fail")
+		}
+		return apiresponse.NotFound("gone")
+	})
+	bw := &bareWriter{h: http.Header{}}
+	h.ServeHTTP(bw, httptest.NewRequest("GET", "/", nil))
+	if bw.code != http.StatusNotFound || !strings.Contains(bw.body.String(), "gone") {
+		t.Fatalf("code = %d, body = %q; want the 404 envelope after unsupported Flush/Hijack", bw.code, bw.body.String())
+	}
+}
+
+func TestRecover_InvalidStatusPanicStillGets500(t *testing.T) {
+	wr := apiresponse.NewWriter(apiresponse.WithLogger(nil))
+	h := wr.Recover(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(1000) // net/http panics on this
+	}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "internal_error") {
+		t.Fatalf("code = %d, body = %q; want the 500 envelope", rec.Code, rec.Body.String())
+	}
+}
+
+// failingFlushWriter mimics net/http: FlushError commits the 200 header, then
+// the flush itself fails (e.g. the client went away).
+type failingFlushWriter struct{ bareWriter }
+
+func (f *failingFlushWriter) FlushError() error {
+	f.WriteHeader(http.StatusOK)
+	return io.ErrClosedPipe
+}
+
+func TestWrappedWriter_FlushFailureAfterHeaderCommitCountsAsWritten(t *testing.T) {
+	wr := apiresponse.NewWriter(apiresponse.WithLogger(nil))
+	h := wr.Handler(func(w http.ResponseWriter, r *http.Request) error {
+		w.(http.Flusher).Flush()
+		return apiresponse.NotFound("gone")
+	})
+	fw := &failingFlushWriter{bareWriter{h: http.Header{}}}
+	h.ServeHTTP(fw, httptest.NewRequest("GET", "/", nil))
+	if fw.code != http.StatusOK || fw.body.Len() != 0 {
+		t.Fatalf("code = %d, body = %q; want the committed 200 and no envelope appended", fw.code, fw.body.String())
 	}
 }

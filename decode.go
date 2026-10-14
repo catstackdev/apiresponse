@@ -17,8 +17,10 @@ const DefaultMaxBodyBytes int64 = 1 << 20
 // Decode reads a JSON request body into T. The body is limited to
 // [DefaultMaxBodyBytes], unknown fields are rejected, and exactly one JSON value
 // is allowed. Failures are returned as *ErrorBody, ready for [Handler]:
-// 415 for a non-JSON Content-Type (application/json or application/*+json), 413 for an oversized body, 400 for anything
-// malformed, including a literal null body. A missing Content-Type is accepted.
+// 415 for a non-JSON Content-Type (application/json or application/*+json), 413
+// for an oversized body (on HTTP/1 also sets "Connection: close" on w), 400 for
+// anything malformed, including a literal null body. A missing Content-Type is
+// accepted.
 func Decode[T any](w http.ResponseWriter, r *http.Request) (T, error) {
 	return DecodeLimit[T](w, r, DefaultMaxBodyBytes)
 }
@@ -37,6 +39,14 @@ func DecodeLimit[T any](w http.ResponseWriter, r *http.Request, maxBytes int64) 
 	}
 	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBytes))
 	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if w != nil && r.ProtoMajor == 1 && errors.As(err, &tooLarge) {
+			// MaxBytesReader normally flags this itself, but only when handed the
+			// server's own ResponseWriter, not a wrapper such as Handler's. HTTP/1
+			// only: the HTTP/2 server treats "Connection: close" as a request to
+			// shut down the whole multiplexed connection.
+			w.Header().Set("Connection", "close")
+		}
 		return v, decodeError(err)
 	}
 	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {

@@ -277,6 +277,15 @@ in registration order, then a generic 500.
 - `Decode` accepts a missing `Content-Type`, `application/json` and
   `application/*+json` (such as `application/problem+json`), rejects any other
   one (415), and allows exactly one JSON value in the body.
+- On an oversized body (413), `Decode` also sets `Connection: close` on HTTP/1
+  so closing the connection is deterministic rather than left to the server's
+  own unread-body handling. It does
+  not do this on HTTP/2, where that header would close the whole connection.
+- `Handler` and `Recover` wrap the `ResponseWriter`. The wrapper forwards
+  `Flush`, `Hijack`, `ReadFrom` (so `http.ServeContent` keeps using sendfile) and
+  `Unwrap` (for `http.ResponseController`). It does not forward the deprecated
+  `http.Pusher` and `http.CloseNotifier`. A `Flush` the writer does not support,
+  or a failed `Hijack`, does not count as output.
 - Messages go to the client verbatim. Never pass `err.Error()` to `Internal` or
   return raw error text from a mapper; keep the real error with
   `.WithCause(err)`.
