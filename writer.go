@@ -130,7 +130,7 @@ func (wr *Writer) Handler(fn HandlerFunc) http.HandlerFunc {
 			return
 		}
 		if tw.wrote {
-			wr.prepare(r, err)
+			_ = wr.prepare(r, err)
 			return
 		}
 		_ = wr.WriteError(w, r, err)

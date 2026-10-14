@@ -26,7 +26,7 @@ func (wr *Writer) Recover(next http.Handler) http.Handler {
 			}
 			perr := &panicError{value: v, stack: debug.Stack()}
 			if tw.wrote {
-				wr.prepare(r, perr) // too late to change the response; just log
+				_ = wr.prepare(r, perr) // too late to change the response; just log
 				return
 			}
 			_ = wr.WriteError(w, r, perr)
