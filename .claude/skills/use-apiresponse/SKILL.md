@@ -63,8 +63,15 @@ c.JSON(e.HTTPStatus(), apiresponse.ErrorResponse{Error: e})
 
 `req, err := apiresponse.Decode[CreateUser](w, r); if err != nil { return err }`.
 1 MiB limit (`DecodeLimit` to change), unknown fields rejected, errors come back
-as 400/413/415 `*ErrorBody`. For `Retry-After` on a 429, set the header before
-returning `RateLimited`. Return errors only before writing a response.
+as 400/413/415 `*ErrorBody` (on HTTP/1 a 413 also sets `Connection: close`). For
+`Retry-After` on a 429, set the header before returning `RateLimited`. Return
+errors only before writing a response: once output has started (a `Write`,
+`Flush`, `ReadFrom`/`http.ServeContent` or a hijack), `Handler` and `Recover`
+log the late error or panic but do not append a second envelope.
+
+Replace the router's plain-text 404/405 with `apiresponse.NotFoundHandler()` and
+`apiresponse.MethodNotAllowedHandler("GET", "POST")` (it sets `Allow`).
+`Detail.Code` is an optional machine-readable reason next to `Field`/`Message`.
 
 ## Mapping domain errors and logging
 
@@ -101,6 +108,9 @@ copies; two `NotFound` sentinels with different messages do not match) or
 - Sentinel errors (`var ErrX = apiresponse.NotFound(...)`) are safe to share.
 - `WriteError(w, err)` passes a nil request to the logger; use
   `Writer.WriteError(w, r, err)` or `Handler` when the logger needs the path.
+- `Handler` and `Recover` pass a wrapped `ResponseWriter` that forwards `Flush`,
+  `Hijack`, `ReadFrom` and `Unwrap` (websockets, SSE and `http.ServeContent`
+  keep working), but not `http.Pusher` or `http.CloseNotifier`.
 - `Recover` cannot change the status if the handler already started writing. The
   default logger logs the panic stack as a `stack` attribute; a custom
   `WithLogger` only receives `panic: <value>` as the error.

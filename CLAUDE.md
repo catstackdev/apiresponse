@@ -45,8 +45,15 @@ deliberately live in the same package as responses because `WriteError`,
   `http.ErrAbortHandler`).
 - `tracker.go`: `trackingWriter`, the `ResponseWriter` wrapper used by `Handler`
   and `Recover` to know whether a response already started. It must keep
-  forwarding `Flush`/`Hijack` and `Unwrap` (websocket upgraders assert
-  `http.Hijacker`).
+  forwarding `Flush`, `Hijack`, `ReadFrom` and `Unwrap` (websocket upgraders
+  assert `http.Hijacker`; `ReadFrom` keeps `http.ServeContent` on sendfile and
+  must call `io.Copy` on the wrapped writer, never on the tracker or a
+  `struct{ io.Writer }` wrapper). For `WriteHeader`, `Flush` and `Hijack`,
+  `wrote` is set only when output really started: not after a `WriteHeader` that
+  panics, a `Flush` that returns `http.ErrNotSupported`, or a failed `Hijack`.
+  Any other `Flush` error still counts (net/http commits the 200 first).
+  `Write` and `ReadFrom` set it before the call, since a failed write may have
+  sent headers.
 - `write.go`: package-level `Write`, `WriteError`, `Handler`, `Recover`,
   `NotFoundHandler`, `MethodNotAllowedHandler` delegating to a default `Writer`.
   No global mutable state; customization goes through `NewWriter`.
@@ -73,6 +80,11 @@ Behaviors that span files and are easy to break:
   typed error) and per-field type errors echo client input; everything else is a
   fixed message. A `null` body is a 400, `maxBytes <= 0` means the default
   limit, and a body read error is a 400.
+- **`Decode` sets `Connection: close` on a 413, HTTP/1 only.** The tracker hides
+  the `requestTooLarge` method that `http.MaxBytesReader` looks for, so Decode
+  does it by hand. Never on HTTP/2: there the header makes the server shut down
+  the whole multiplexed connection. `protocol_test.go` covers both against real
+  servers (it skips where loopback binding is blocked).
 - **`Decode` accepts `application/json` and `application/*+json`**; other media
   types are 415.
 - **`*ErrorBody` methods are nil-safe** (`Error` is `<nil>`, `HTTPStatus` 500,
