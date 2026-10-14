@@ -125,9 +125,9 @@ them for your clients alongside this table.
 - 204 and 304 responses have no body. Do not call `.json()` on them.
 - `data` can legitimately be `0`, `""` or `false`. Check for `null`/missing, not
   falsiness. Lists are always `[]`, never `null`.
-- Cursor pagination: pass `next_cursor` back unchanged and stop when
-  `has_more` is `false`. Treat the cursor as opaque. Offset pagination returns
-  `page` and `total`.
+- Cursor pagination: pass `next_cursor` back unchanged and stop when `has_more`
+  is `false`. Treat the cursor as opaque. Offset pagination returns `page` and
+  `total`.
 - Not every response comes from this library. A proxy, gateway or router can
   return plain text or HTML (for example a 502 from a load balancer). Check
   `Content-Type: application/json` before parsing, and fall back to the status
@@ -193,7 +193,7 @@ http.ListenAndServe(":8080", apiresponse.Recover(mux))
 | No content      | `Write(w, 204, nil)`                                                                                                                                                                                                                                               |
 | Errors          | `BadRequest`, `Unauthorized`, `Forbidden`, `NotFound`, `Conflict`, `Validation(details...)`, `RateLimited`, `Internal`, `MethodNotAllowed`, `UnsupportedMediaType`, `PayloadTooLarge`, `ServiceUnavailable`, `DeadlineExceeded` (504), or `New(status, code, msg)` |
 | List + totals   | `ListWithSummary(items, page, summary)`; `summary` is any struct, omitted when nil                                                                                                                                                                                 |
-| Read a body     | `Decode[T](w, r)` or `DecodeLimit[T](w, r, maxBytes)`: 1 MiB default limit, unknown fields rejected, `null` body rejected, limit <= 0 means default; returns 400/413/415 as `*ErrorBody` (non-field decode errors get a generic message)                                                                                                                           |
+| Read a body     | `Decode[T](w, r)` or `DecodeLimit[T](w, r, maxBytes)`: 1 MiB default limit, unknown fields rejected, `null` body rejected, limit <= 0 means default; returns 400/413/415 as `*ErrorBody` (non-field decode errors get a generic message)                           |
 | Enrich an error | `.WithDetails(...)`, `.WithRequestID(id)`, `.WithCause(err)`, `.WithStatus(n)` (each returns a copy)                                                                                                                                                               |
 | Any error       | `WriteError(w, err)`                                                                                                                                                                                                                                               |
 
@@ -224,8 +224,8 @@ router).
 
 ## Custom error mapping, logging, panics
 
-Package-level functions use a default `Writer`. Build your own in production
-to map domain errors and control logging; only a `Writer` can add request IDs
+Package-level functions use a default `Writer`. Build your own in production to
+map domain errors and control logging; only a `Writer` can add request IDs
 (`WithRequestIDFunc`), and the package-level `WriteError(w, err)` has no
 request, so its logs carry no request context:
 
@@ -332,8 +332,8 @@ gh skill install catstackdev/apiresponse use-apiresponse@v0.1.1 \
 gh skill update
 ```
 
-`--allow-hidden-dirs` is required because the skill lives under `.claude/`.
-`gh` prints a warning about hidden directories; that is expected here.
+`--allow-hidden-dirs` is required because the skill lives under `.claude/`. `gh`
+prints a warning about hidden directories; that is expected here.
 
 **Using it:** ask things like "add a GET /orders endpoint with cursor
 pagination" and Claude picks the skill up from its description. Inside this repo

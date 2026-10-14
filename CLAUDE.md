@@ -61,9 +61,22 @@ Behaviors that span files and are easy to break:
 - **`Write` marshals before `WriteHeader`**, so an encode failure produces a
   clean 500 (`internalBody`) rather than a half-written response. 1xx/204/304
   write no body.
+- **`Write` rejects statuses outside 100-999** with a clean 500 and a returned
+  error (net/http would panic). Nothing logs it.
+- **`Decode` error messages never leak internals.** Only unknown-field errors
+  (detected by the `json: unknown field ` prefix, since encoding/json has no
+  typed error) and per-field type errors echo client input; everything else is
+  a fixed message. A `null` body is a 400, `maxBytes <= 0` means the default
+  limit, and a body read error is a 400.
+- **`With*` methods clone `Details`** (via `clone()`), and `Validation` /
+  `WithDetails` copy the caller's slice, so copies never share it.
+- **`Writer.resolve` skips mappers for a nil error** (generic 500), so mappers
+  never see nil.
+- **`OffsetPage` computes the page count by division**, never by multiplying
+  page by limit, to avoid int64 overflow.
 - **Typed-nil `*ErrorBody` is ignored.** `findErrorBody` (errors.go) is the one
-  place that searches an error chain; `FromError`, `IsCode` and
-  `Writer.resolve` all use it so a nil `*ErrorBody` never gets dereferenced.
+  place that searches an error chain; `FromError`, `IsCode` and `Writer.resolve`
+  all use it so a nil `*ErrorBody` never gets dereferenced.
 - **Panics:** `Recover` wraps the value in an unexported `panicError` (message
   `panic: <v>`, stack kept separately); the default logger emits the stack as a
   `stack` attr. Custom `Logger`s only get `panic: <v>` as the error (the type is
@@ -93,5 +106,6 @@ Behaviors that span files and are easy to break:
 - `ErrorBody.Is` matches by `Code` AND `Message`, so `errors.Is` works across
   `With*` copies while sentinels sharing a code (`ErrUserNotFound`,
   `ErrOrderNotFound`) stay distinct. Never change a sentinel's message in a
-  `With*` method. `IsCode` is the code-only check. Request IDs from `WithRequestIDFunc`
-  are applied on a copy in `Writer.WriteError`, never on the shared error.
+  `With*` method. `IsCode` is the code-only check. Request IDs from
+  `WithRequestIDFunc` are applied on a copy in `Writer.WriteError`, never on the
+  shared error.
