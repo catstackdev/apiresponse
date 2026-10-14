@@ -17,7 +17,7 @@ const DefaultMaxBodyBytes int64 = 1 << 20
 // Decode reads a JSON request body into T. The body is limited to
 // [DefaultMaxBodyBytes], unknown fields are rejected, and exactly one JSON value
 // is allowed. Failures are returned as *ErrorBody, ready for [Handler]:
-// 415 for a non-JSON Content-Type, 413 for an oversized body, 400 for anything
+// 415 for a non-JSON Content-Type (application/json or application/*+json), 413 for an oversized body, 400 for anything
 // malformed, including a literal null body. A missing Content-Type is accepted.
 func Decode[T any](w http.ResponseWriter, r *http.Request) (T, error) {
 	return DecodeLimit[T](w, r, DefaultMaxBodyBytes)
@@ -28,8 +28,8 @@ func Decode[T any](w http.ResponseWriter, r *http.Request) (T, error) {
 func DecodeLimit[T any](w http.ResponseWriter, r *http.Request, maxBytes int64) (T, error) {
 	var v T
 	if ct := r.Header.Get("Content-Type"); ct != "" {
-		if mt, _, err := mime.ParseMediaType(ct); err != nil || mt != "application/json" {
-			return v, UnsupportedMediaType("Content-Type must be application/json")
+		if mt, _, err := mime.ParseMediaType(ct); err != nil || !isJSONMediaType(mt) {
+			return v, UnsupportedMediaType("Content-Type must be JSON")
 		}
 	}
 	if maxBytes <= 0 {
@@ -54,6 +54,13 @@ func DecodeLimit[T any](w http.ResponseWriter, r *http.Request, maxBytes int64) 
 		return v, decodeError(err)
 	}
 	return v, nil
+}
+
+// isJSONMediaType reports whether mt is application/json or an application/*+json
+// structured-syntax type such as application/problem+json.
+func isJSONMediaType(mt string) bool {
+	return mt == "application/json" ||
+		(strings.HasPrefix(mt, "application/") && strings.HasSuffix(mt, "+json"))
 }
 
 func decodeError(err error) *ErrorBody {

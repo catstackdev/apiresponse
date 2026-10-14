@@ -102,7 +102,7 @@ Works the same from TypeScript, Go, or anything that reads JSON.
 | `method_not_allowed`     | 405  | Wrong HTTP method               | Client bug; fix the call                   |
 | `conflict`               | 409  | State conflict (e.g. duplicate) | Reload and let the user resolve            |
 | `payload_too_large`      | 413  | Body over the size limit        | Send less data                             |
-| `unsupported_media_type` | 415  | Wrong `Content-Type`            | Send `application/json`                    |
+| `unsupported_media_type` | 415  | Wrong `Content-Type`            | Send `application/json` (or `*+json`)      |
 | `validation_failed`      | 422  | Field errors in `details`       | Show each `details[].message` at its field |
 | `rate_limited`           | 429  | Too many requests               | Back off, then retry                       |
 | `internal_error`         | 500  | Server bug                      | Show generic error; retry is optional      |
@@ -270,8 +270,15 @@ in registration order, then a generic 500.
 
 - Unknown errors never leak: the client sees `internal server error`. A
   typed-nil `*ErrorBody` is treated as an unknown error (generic 500).
-- `Decode` accepts a missing `Content-Type`, rejects any other non-JSON one
-  (415), and allows exactly one JSON value in the body.
+- `Decode` accepts a missing `Content-Type`, `application/json` and
+  `application/*+json` (such as `application/problem+json`), rejects any other
+  one (415), and allows exactly one JSON value in the body.
+- Messages go to the client verbatim. Never pass `err.Error()` to `Internal` or
+  return raw error text from a mapper; keep the real error with
+  `.WithCause(err)`.
+- `WithStatus` takes a status in 100-999; anything else is written as a
+  generic 500.
+- Methods on a nil `*ErrorBody` do not panic (`Error()` is `<nil>`, status 500).
 - `Data` is a pointer, so `0`, `""` and `false` are still serialized; a nil
   slice in `List` becomes `[]`.
 - JSON is written without HTML escaping.

@@ -62,7 +62,10 @@ func Forbidden(msg string) *ErrorBody    { return New(http.StatusForbidden, Code
 func NotFound(msg string) *ErrorBody     { return New(http.StatusNotFound, CodeNotFound, msg) }
 func Conflict(msg string) *ErrorBody     { return New(http.StatusConflict, CodeConflict, msg) }
 func RateLimited(msg string) *ErrorBody  { return New(http.StatusTooManyRequests, CodeRateLimited, msg) }
-func Internal(msg string) *ErrorBody     { return New(http.StatusInternalServerError, CodeInternal, msg) }
+
+// Internal builds a 500. Never pass err.Error() as msg: the message goes to the
+// client verbatim. Keep the real error with [ErrorBody.WithCause] instead.
+func Internal(msg string) *ErrorBody { return New(http.StatusInternalServerError, CodeInternal, msg) }
 
 func MethodNotAllowed(msg string) *ErrorBody {
 	return New(http.StatusMethodNotAllowed, CodeMethodNotAllowed, msg)
@@ -94,6 +97,9 @@ func Validation(details ...Detail) *ErrorBody {
 
 // Error implements the error interface.
 func (e *ErrorBody) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
 	if e.cause != nil {
 		return e.Code + ": " + e.Message + ": " + e.cause.Error()
 	}
@@ -101,7 +107,12 @@ func (e *ErrorBody) Error() string {
 }
 
 // Unwrap exposes the underlying cause to errors.Is / errors.As.
-func (e *ErrorBody) Unwrap() error { return e.cause }
+func (e *ErrorBody) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
 
 // Is reports whether target is an *ErrorBody with the same Code and Message.
 // This keeps errors.Is(err, ErrSentinel) working after With* methods return
@@ -109,7 +120,7 @@ func (e *ErrorBody) Unwrap() error { return e.cause }
 // stay distinct. Use [IsCode] to match on the code alone.
 func (e *ErrorBody) Is(target error) bool {
 	t, ok := target.(*ErrorBody)
-	return ok && t != nil && e.Code == t.Code && e.Message == t.Message
+	return ok && e != nil && t != nil && e.Code == t.Code && e.Message == t.Message
 }
 
 // IsCode reports whether err wraps an *ErrorBody with the given code.
@@ -131,15 +142,19 @@ func ContextErrors(err error) *ErrorBody {
 
 // HTTPStatus returns the HTTP status for this error (500 if unset).
 func (e *ErrorBody) HTTPStatus() int {
-	if e.status == 0 {
+	if e == nil || e.status == 0 {
 		return http.StatusInternalServerError
 	}
 	return e.status
 }
 
 // clone returns a copy that shares no mutable state with e, so mutating one
-// copy's Details never affects the original (or a package-level sentinel).
+// copy's Details never affects the original (or a package-level sentinel). A
+// nil e yields a generic internal error rather than a panic.
 func (e *ErrorBody) clone() *ErrorBody {
+	if e == nil {
+		return Internal("internal server error")
+	}
 	c := *e
 	c.Details = slices.Clone(e.Details)
 	return &c
@@ -167,7 +182,8 @@ func (e *ErrorBody) WithRequestID(id string) *ErrorBody {
 	return c
 }
 
-// WithStatus returns a copy with a different HTTP status.
+// WithStatus returns a copy with a different HTTP status. The status must be in
+// 100-999; anything else makes Write answer with a generic 500.
 func (e *ErrorBody) WithStatus(status int) *ErrorBody {
 	c := e.clone()
 	c.status = status

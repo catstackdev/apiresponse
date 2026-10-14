@@ -216,3 +216,20 @@ func TestWith_PreservesMessage(t *testing.T) {
 		}
 	}
 }
+
+func TestErrorBody_NilReceiverIsSafe(t *testing.T) {
+	var e *apiresponse.ErrorBody
+	if e.Error() != "<nil>" || e.HTTPStatus() != 500 || e.Unwrap() != nil || e.Is(apiresponse.NotFound("x")) {
+		t.Fatal("nil receiver methods must not panic or report a match")
+	}
+	for name, c := range map[string]*apiresponse.ErrorBody{
+		"WithCause":     e.WithCause(errors.New("x")),
+		"WithDetails":   e.WithDetails(),
+		"WithRequestID": e.WithRequestID("id"),
+		"WithStatus":    e.WithStatus(400),
+	} {
+		if c == nil || c.Code != apiresponse.CodeInternal {
+			t.Errorf("%s on nil: got %+v, want a generic internal error", name, c)
+		}
+	}
+}

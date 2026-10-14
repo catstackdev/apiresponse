@@ -31,7 +31,9 @@ type Writer struct {
 type Option func(*Writer)
 
 // WithErrorMapper registers a mapper. Mappers run in registration order, after
-// the check for an existing *ErrorBody.
+// the check for an existing *ErrorBody. The mapped message is sent to the client
+// verbatim, so for 5xx results use a fixed message and keep the raw error as the
+// cause (the Writer attaches it automatically).
 func WithErrorMapper(m ErrorMapper) Option {
 	return func(wr *Writer) { wr.mappers = append(wr.mappers, m) }
 }

@@ -28,7 +28,8 @@ deliberately live in the same package as responses because `WriteError`,
 `Handler` and `ErrorResponse` all depend on `*ErrorBody`.
 
 - `response.go`: success envelope `Response[T]` (`Data *T`, optional
-  `Pagination`) and constructors `OK`, `List`, `CursorPage`, `OffsetPage`.
+  `Pagination`, optional `Summary`) and constructors `OK`, `List`,
+  `ListWithSummary`, `CursorPage`, `OffsetPage`.
 - `errors.go`: `ErrorBody` (implements `error`), `ErrorResponse` envelope, code
   constants, constructors per HTTP status (adding a code means adding its
   constructor, a test row, and the README table), `FromError`, `IsCode`, and the
@@ -68,6 +69,10 @@ Behaviors that span files and are easy to break:
   typed error) and per-field type errors echo client input; everything else is a
   fixed message. A `null` body is a 400, `maxBytes <= 0` means the default
   limit, and a body read error is a 400.
+- **`Decode` accepts `application/json` and `application/*+json`**; other media
+  types are 415.
+- **`*ErrorBody` methods are nil-safe** (`Error` is `<nil>`, `HTTPStatus` 500,
+  `With*` on nil yield a generic internal error).
 - **`With*` methods clone `Details`** (via `clone()`), and `Validation` /
   `WithDetails` copy the caller's slice, so copies never share it.
 - **`Writer.resolve` skips mappers for a nil error** (generic 500), so mappers
