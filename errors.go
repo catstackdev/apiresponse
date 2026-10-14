@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 )
 
 // Machine-readable error codes. Clients should switch on these, not on Message.
@@ -85,7 +86,7 @@ func DeadlineExceeded(msg string) *ErrorBody {
 // Validation builds a 422 error carrying field-level details.
 func Validation(details ...Detail) *ErrorBody {
 	e := New(http.StatusUnprocessableEntity, CodeValidation, "validation failed")
-	e.Details = details
+	e.Details = slices.Clone(details)
 	return e
 }
 
@@ -145,7 +146,7 @@ func (e *ErrorBody) WithCause(err error) *ErrorBody {
 // WithDetails returns a copy with the given details.
 func (e *ErrorBody) WithDetails(details ...Detail) *ErrorBody {
 	c := *e
-	c.Details = details
+	c.Details = slices.Clone(details)
 	return &c
 }
 

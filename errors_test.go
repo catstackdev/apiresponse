@@ -178,3 +178,13 @@ func TestIs_DistinguishesSentinelsSharingACode(t *testing.T) {
 		t.Fatal("IsCode must still match on code alone")
 	}
 }
+
+func TestDetails_AreCopied(t *testing.T) {
+	in := []apiresponse.Detail{{Field: "a", Message: "bad"}}
+	v := apiresponse.Validation(in...)
+	w := apiresponse.BadRequest("x").WithDetails(in...)
+	in[0].Field = "mutated"
+	if v.Details[0].Field != "a" || w.Details[0].Field != "a" {
+		t.Fatal("caller mutation leaked into the error")
+	}
+}

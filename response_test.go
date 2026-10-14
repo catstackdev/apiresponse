@@ -120,3 +120,12 @@ func TestListWithSummary(t *testing.T) {
 		t.Fatalf("nil summary must be omitted: %s", b)
 	}
 }
+
+func TestOffsetPage_NoOverflow(t *testing.T) {
+	if p := apiresponse.OffsetPage(1<<40, 1<<40, 100); p.HasMore {
+		t.Fatal("huge page and limit must not report HasMore")
+	}
+	if p := apiresponse.OffsetPage(1, 1<<40, 1<<41); !p.HasMore {
+		t.Fatal("first page of a larger set must report HasMore")
+	}
+}

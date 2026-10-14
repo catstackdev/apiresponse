@@ -56,6 +56,9 @@ func decodeError(err error) *ErrorBody {
 	case errors.Is(err, io.EOF):
 		return BadRequest("request body is empty").WithCause(err)
 	case errors.As(err, &typeErr):
+		if typeErr.Field == "" { // top-level mismatch, e.g. a string where an object is expected
+			return BadRequest("invalid request body").WithCause(err)
+		}
 		return BadRequest(fmt.Sprintf("invalid value for field %q", typeErr.Field)).WithCause(err)
 	case errors.As(err, &syntaxErr), errors.Is(err, io.ErrUnexpectedEOF):
 		return BadRequest("malformed JSON").WithCause(err)

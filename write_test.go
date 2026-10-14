@@ -106,3 +106,15 @@ func TestHandler_SuccessWritesNothingExtra(t *testing.T) {
 		t.Fatalf("code=%d body=%s", rec.Code, rec.Body)
 	}
 }
+
+func TestWrite_InvalidStatusYields500(t *testing.T) {
+	for _, status := range []int{0, 99, 1000} {
+		rec := httptest.NewRecorder()
+		if err := apiresponse.Write(rec, status, apiresponse.OK("x")); err == nil {
+			t.Fatalf("status %d: want an error", status)
+		}
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("status %d: got %d, want 500", status, rec.Code)
+		}
+	}
+}

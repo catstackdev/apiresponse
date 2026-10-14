@@ -34,7 +34,8 @@ func List[T any](items []T, p Pagination) Response[[]T] {
 }
 
 // ListWithSummary is [List] plus a summary of the whole filtered set (not just
-// this page), e.g. a grand total for a report. A nil summary is omitted.
+// this page), e.g. a grand total for a report. A nil (untyped) summary is omitted; a typed nil
+// pointer is encoded as null.
 func ListWithSummary[T any](items []T, p Pagination, summary any) Response[[]T] {
 	r := List(items, p)
 	r.Summary = summary
@@ -55,7 +56,7 @@ func OffsetPage(page, limit int, total int64) Pagination {
 	total = max(total, 0)
 	return Pagination{
 		Limit:   limit,
-		HasMore: limit > 0 && int64(page)*int64(limit) < total,
+		HasMore: limit > 0 && int64(page) < (total+int64(limit)-1)/int64(limit),
 		Page:    &page,
 		Total:   &total,
 	}

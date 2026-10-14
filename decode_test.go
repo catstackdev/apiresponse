@@ -45,6 +45,7 @@ func TestDecode(t *testing.T) {
 		{"malformed", "application/json", `{"name":`, 0, apiresponse.CodeBadRequest, 400},
 		{"syntax error", "application/json", `{name}`, 0, apiresponse.CodeBadRequest, 400},
 		{"wrong type", "application/json", `{"age":"old"}`, 0, apiresponse.CodeBadRequest, 400},
+		{"top-level type mismatch", "application/json", `"str"`, 0, apiresponse.CodeBadRequest, 400},
 		{"unknown field", "application/json", `{"nope":1}`, 0, apiresponse.CodeBadRequest, 400},
 		{"two values", "application/json", `{} {}`, 0, apiresponse.CodeBadRequest, 400},
 		{"trailing garbage", "application/json", `{} x`, 0, apiresponse.CodeBadRequest, 400},

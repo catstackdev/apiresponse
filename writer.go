@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 )
@@ -65,6 +66,11 @@ var defaultWriter = NewWriter()
 // instead of a half-written body. Statuses that forbid a body (1xx, 204, 304)
 // write headers only. HTML characters are not escaped.
 func (wr *Writer) Write(w http.ResponseWriter, status int, v any) error {
+	if status < 100 || status > 999 {
+		// net/http panics on these; answer with a clean 500 instead.
+		_ = writeRaw(w, http.StatusInternalServerError, internalBody)
+		return fmt.Errorf("apiresponse: invalid HTTP status %d", status)
+	}
 	if !bodyAllowed(status) {
 		w.WriteHeader(status)
 		return nil
@@ -80,7 +86,9 @@ func (wr *Writer) Write(w http.ResponseWriter, status int, v any) error {
 // WriteError resolves err to an *ErrorBody and writes it as an error envelope.
 // Resolution order: an *ErrorBody already in the chain, then registered
 // mappers, then a generic 500. r may be nil; it is only passed to the Logger.
-// The returned error is the write/marshal failure, not err itself.
+// A nil err is treated like any unknown error: a generic 500 (mappers are
+// still consulted, so they must tolerate nil). The returned error is the
+// write/marshal failure, not err itself.
 func (wr *Writer) WriteError(w http.ResponseWriter, r *http.Request, err error) error {
 	eb := wr.resolve(err)
 	if eb.RequestID == "" && wr.requestID != nil && r != nil {
