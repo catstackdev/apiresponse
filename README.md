@@ -115,8 +115,10 @@ them for your clients alongside this table.
 
 **Things worth knowing**
 
-- `details` appears only on `validation_failed`. `details[].field` may be empty
-  when the problem is not tied to one field.
+- `details` is mainly sent with `validation_failed`, but a server may attach it
+  to any error. `details[].field` may be empty when the problem is not tied to
+  one field; `details[].code`, when present, is a stable reason such as
+  `required`.
 - `summary`, when present, describes the whole filtered set (for example a grand
   total), not just the current page.
 - `request_id`, when present, is what to quote in a bug report so the server
@@ -146,12 +148,12 @@ type Pagination = {
   total?: number; // offset style
 };
 
-type Success<T> = { data: T; pagination?: Pagination };
+type Success<T> = { data: T; pagination?: Pagination; summary?: unknown };
 
 type ApiError = {
   code: string; // switch on this
   message: string;
-  details?: { field?: string; message: string }[];
+  details?: { field?: string; code?: string; message: string }[];
   request_id?: string;
 };
 
@@ -195,9 +197,9 @@ http.ListenAndServe(":8080", apiresponse.Recover(mux))
 | Errors          | `BadRequest`, `Unauthorized`, `Forbidden`, `NotFound`, `Conflict`, `Validation(details...)`, `RateLimited`, `Internal`, `MethodNotAllowed`, `UnsupportedMediaType`, `PayloadTooLarge`, `ServiceUnavailable`, `DeadlineExceeded` (504), or `New(status, code, msg)` |
 | List + totals   | `ListWithSummary(items, page, summary)`; `summary` is any struct, omitted when nil                                                                                                                                                                                 |
 | Read a body     | `Decode[T](w, r)` or `DecodeLimit[T](w, r, maxBytes)`: 1 MiB default limit, unknown fields rejected, `null` body rejected, limit <= 0 means default; returns 400/413/415 as `*ErrorBody` (non-field decode errors get a generic message)                           |
-| Enrich an error | `.WithDetails(...)`, `.WithRequestID(id)`, `.WithCause(err)`, `.WithStatus(n)` (each returns a copy)                                                                                                                                                               |
+| Enrich an error | `.WithDetails(...)`, `.WithRequestID(id)`, `.WithCause(err)`, `.WithStatus(n)`, `.WithRetryAfter(d)` (sends `Retry-After`, for 429/503) (each returns a copy)                                                                                                      |
 | JSON 404 / 405  | `NotFoundHandler()`, `MethodNotAllowedHandler("GET", "POST")` (sets `Allow`); register them as your router's not-found / method-not-allowed handlers                                                                                                               |
-| Any error       | `WriteError(w, err)`                                                                                                                                                                                                                                               |
+| Any error       | `WriteError(w, r, err)` (`r` may be nil)                                                                                                                                                                                                                           |
 
 `*ErrorBody` implements `error`, so handlers can return it directly. Code
 constants (`CodeNotFound`, `CodeValidation`, ...) are what clients should switch
@@ -228,8 +230,8 @@ router).
 
 Package-level functions use a default `Writer`. Build your own in production to
 map domain errors and control logging; only a `Writer` can add request IDs
-(`WithRequestIDFunc`), and the package-level `WriteError(w, err)` has no
-request, so its logs carry no request context:
+(`WithRequestIDFunc`), and the package-level `WriteError(w, r, err)` uses a
+default `Writer` with no mappers or request ID function:
 
 ```go
 w := apiresponse.NewWriter(
@@ -240,7 +242,11 @@ w := apiresponse.NewWriter(
         return nil // not mine, try the next mapper
     }),
     apiresponse.WithLogger(func(r *http.Request, err error, eb *apiresponse.ErrorBody) {
-        slog.Error("server error", "path", r.URL.Path, "err", err)
+        path := "" // r is nil when WriteError was called without a request
+        if r != nil {
+            path = r.URL.Path
+        }
+        slog.Error("server error", "path", path, "err", err)
     }),
 )
 
@@ -264,7 +270,8 @@ in registration order, then a generic 500.
   the original error, so the real cause is visible. `WithLogger(nil)` disables
   it. `r` is nil when `WriteError` is called without a request. The default
   logger includes `request_id` (when `WithRequestIDFunc` is set) and skips
-  `context.Canceled`, since the client is gone; a custom logger still sees it.
+  `context.Canceled`, broken-pipe and connection-reset write errors, since the
+  client is gone; a custom logger still sees it.
 - **Panics:** `Recover` returns the standard 500 envelope and logs the panic
   with its stack as a separate `stack` attribute (the error message is just
   `panic: <value>`). It re-panics `http.ErrAbortHandler`. If the handler already
@@ -279,13 +286,13 @@ in registration order, then a generic 500.
   one (415), and allows exactly one JSON value in the body.
 - On an oversized body (413), `Decode` also sets `Connection: close` on HTTP/1
   so closing the connection is deterministic rather than left to the server's
-  own unread-body handling. It does
-  not do this on HTTP/2, where that header would close the whole connection.
+  own unread-body handling. It does not do this on HTTP/2, where that header
+  would close the whole connection.
 - `Handler` and `Recover` wrap the `ResponseWriter`. The wrapper forwards
-  `Flush`, `Hijack`, `ReadFrom` (so `http.ServeContent` keeps using sendfile) and
-  `Unwrap` (for `http.ResponseController`). It does not forward the deprecated
-  `http.Pusher` and `http.CloseNotifier`. A `Flush` the writer does not support,
-  or a failed `Hijack`, does not count as output.
+  `Flush`, `Hijack`, `ReadFrom` (so `http.ServeContent` keeps using sendfile)
+  and `Unwrap` (for `http.ResponseController`). It does not forward the
+  deprecated `http.Pusher` and `http.CloseNotifier`. A `Flush` the writer does
+  not support, or a failed `Hijack`, does not count as output.
 - Messages go to the client verbatim. Never pass `err.Error()` to `Internal` or
   return raw error text from a mapper; keep the real error with
   `.WithCause(err)`.
@@ -304,11 +311,9 @@ in registration order, then a generic 500.
 - If `fn` (in `Handler`) or the wrapped handler (in `Recover`) already started
   the response, the late error or panic is logged but no second envelope is
   appended. Still, return errors before writing when you can. Headers set before
-  returning an error are kept; for a 429, set `Retry-After` yourself:
-  `w.Header().Set("Retry-After", "30"); return apiresponse.RateLimited("slow down")`.
-- `Handler` and `Recover` wrap the `ResponseWriter` to track this. The wrapper
-  forwards `Flush` and `Hijack` and exposes `Unwrap` for
-  `http.ResponseController`.
+  returning an error are kept, except `Content-Length` and
+  `Content-Disposition`, which describe a body that was never sent. For a 429,
+  use `apiresponse.RateLimited("slow down").WithRetryAfter(30 * time.Second)`.
 - `With*` methods copy, so package-level sentinel errors are safe:
   `var ErrUserNotFound = apiresponse.NotFound("user not found")`.
 

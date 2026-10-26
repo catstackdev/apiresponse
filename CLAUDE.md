@@ -51,9 +51,9 @@ deliberately live in the same package as responses because `WriteError`,
   `struct{ io.Writer }` wrapper). For `WriteHeader`, `Flush` and `Hijack`,
   `wrote` is set only when output really started: not after a `WriteHeader` that
   panics, a `Flush` that returns `http.ErrNotSupported`, or a failed `Hijack`.
-  Any other `Flush` error still counts (net/http commits the 200 first).
-  `Write` and `ReadFrom` set it before the call, since a failed write may have
-  sent headers.
+  Any other `Flush` error still counts (net/http commits the 200 first). `Write`
+  and `ReadFrom` set it before the call, since a failed write may have sent
+  headers.
 - `write.go`: package-level `Write`, `WriteError`, `Handler`, `Recover`,
   `NotFoundHandler`, `MethodNotAllowedHandler` delegating to a default `Writer`.
   No global mutable state; customization goes through `NewWriter`.
@@ -110,7 +110,14 @@ Behaviors that span files and are easy to break:
 - **5xx logging:** the Logger fires only for 5xx and receives the original error
   (mapped errors get it attached as cause). `r` may be nil when called via
   package-level `WriteError`. The default logger adds `request_id` when set and
-  skips `context.Canceled` (client gone); custom Loggers still see everything.
+  skips `context.Canceled`, `EPIPE` and `ECONNRESET` (client gone); custom
+  Loggers still see everything.
+- **Error-path headers:** `Handler` and `Recover` drop `Content-Length` and
+  `Content-Disposition` before writing the envelope (never `Content-Encoding`: a
+  compression middleware owns it). `WithRetryAfter` is applied by
+  `Writer.WriteError` as a `Retry-After` header (whole seconds, rounded up, no
+  overflow) and is unexported state, never in the JSON body.
+- `CursorPage` and `OffsetPage` both clamp a negative limit to 0.
 - JSON is encoded with HTML escaping off and the trailing newline trimmed.
 - `Pagination` serves both cursor and offset styles; unused fields are
   `omitempty`.

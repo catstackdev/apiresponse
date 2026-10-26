@@ -64,7 +64,7 @@ c.JSON(e.HTTPStatus(), apiresponse.ErrorResponse{Error: e})
 `req, err := apiresponse.Decode[CreateUser](w, r); if err != nil { return err }`.
 1 MiB limit (`DecodeLimit` to change), unknown fields rejected, errors come back
 as 400/413/415 `*ErrorBody` (on HTTP/1 a 413 also sets `Connection: close`). For
-`Retry-After` on a 429, set the header before returning `RateLimited`. Return
+`Retry-After` on a 429/503, use `RateLimited(msg).WithRetryAfter(d)`. Return
 errors only before writing a response: once output has started (a `Write`,
 `Flush`, `ReadFrom`/`http.ServeContent` or a hijack), `Handler` and `Recover`
 log the late error or panic but do not append a second envelope.
@@ -106,8 +106,8 @@ copies; two `NotFound` sentinels with different messages do not match) or
 - `With*` methods return copies; use the returned value. `e.WithRequestID(id)`
   alone does nothing.
 - Sentinel errors (`var ErrX = apiresponse.NotFound(...)`) are safe to share.
-- `WriteError(w, err)` passes a nil request to the logger; use
-  `Writer.WriteError(w, r, err)` or `Handler` when the logger needs the path.
+- `WriteError(w, r, err)` takes the request for the logger (method, path,
+  request ID); `r` may be nil. Prefer `Handler`, which passes it for you.
 - `Handler` and `Recover` pass a wrapped `ResponseWriter` that forwards `Flush`,
   `Hijack`, `ReadFrom` and `Unwrap` (websockets, SSE and `http.ServeContent`
   keep working), but not `http.Pusher` or `http.CloseNotifier`.
