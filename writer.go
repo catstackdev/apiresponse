@@ -127,10 +127,10 @@ func (wr *Writer) prepare(r *http.Request, err error) *ErrorBody {
 // with WriteError. The result works with net/http, chi, and anything else that
 // accepts an http.Handler. If fn already started the response, the returned
 // error cannot be sent: it is passed to the Logger (when its status qualifies)
-// and no second envelope is appended (a broken-pipe or connection-reset write
-// error is dropped entirely: the client is gone). Headers set before returning an error
-// are kept, except Content-Length and Content-Disposition, which describe the
-// body that was never sent and would corrupt the error envelope.
+// and no second envelope is appended; a broken-pipe or connection-reset error
+// is dropped entirely, since the client is gone. Headers set before returning
+// an error are kept, except Content-Length and Content-Disposition, which
+// describe a body that was never sent and would corrupt the error envelope.
 func (wr *Writer) Handler(fn HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tw := &trackingWriter{ResponseWriter: w}
