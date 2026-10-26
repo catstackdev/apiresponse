@@ -12,7 +12,8 @@ Notable changes per tagged release.
 - `CursorPage` clamps a negative limit to 0, like `OffsetPage`.
 - `Handler` and `Recover` drop stale `Content-Length` and `Content-Disposition`
   before writing an error envelope.
-- Default logger skips client-disconnect write errors (`EPIPE`, `ECONNRESET`).
+- `Handler` drops a broken-pipe or connection-reset error returned after the
+  response started (client gone) instead of logging it as a server error.
 - Default logger no longer prints `error=<nil>`; the `Writer` doc now says the
   zero value works (without logging).
 - Add fuzz tests for `Decode` and `OffsetPage`, and runnable examples.

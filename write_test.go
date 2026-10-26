@@ -213,12 +213,25 @@ func TestRecover_DropsStaleEntityHeaders(t *testing.T) {
 	}
 }
 
-func TestDefaultLogger_SkipsClientGoneWriteErrors(t *testing.T) {
-	for _, err := range []error{syscall.EPIPE, syscall.ECONNRESET, fmt.Errorf("write: %w", syscall.EPIPE)} {
+func TestHandler_LateClientGoneErrorIsNotLogged(t *testing.T) {
+	for _, err := range []error{syscall.EPIPE, fmt.Errorf("write: %w", syscall.ECONNRESET)} {
 		buf := captureSlog(t)
-		_ = apiresponse.WriteError(httptest.NewRecorder(), nil, err)
+		h := apiresponse.Handler(func(w http.ResponseWriter, _ *http.Request) error {
+			_, _ = w.Write([]byte("partial"))
+			return err
+		})
+		h(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
 		if buf.Len() != 0 {
 			t.Fatalf("logged a client disconnect (%v): %q", err, buf.String())
 		}
+	}
+}
+
+func TestWriteError_UpstreamConnectionResetIsStillLogged(t *testing.T) {
+	buf := captureSlog(t)
+	rec := httptest.NewRecorder()
+	_ = apiresponse.WriteError(rec, nil, fmt.Errorf("query: %w", syscall.ECONNRESET))
+	if rec.Code != 500 || buf.Len() == 0 {
+		t.Fatalf("code=%d log=%q: a DB connection reset must be logged", rec.Code, buf.String())
 	}
 }

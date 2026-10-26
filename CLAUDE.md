@@ -110,8 +110,7 @@ Behaviors that span files and are easy to break:
 - **5xx logging:** the Logger fires only for 5xx and receives the original error
   (mapped errors get it attached as cause). `r` may be nil when called via
   package-level `WriteError`. The default logger adds `request_id` when set and
-  skips `context.Canceled`, `EPIPE` and `ECONNRESET` (client gone); custom
-  Loggers still see everything.
+  skips `context.Canceled` (client gone); custom Loggers still see everything.
 - **Error-path headers:** `Handler` and `Recover` drop `Content-Length` and
   `Content-Disposition` before writing the envelope (never `Content-Encoding`: a
   compression middleware owns it). `WithRetryAfter` is applied by

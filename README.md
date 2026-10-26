@@ -222,6 +222,10 @@ e := apiresponse.FromError(err)
 c.JSON(e.HTTPStatus(), apiresponse.ErrorResponse{Error: e})
 ```
 
+This path does not send the `Retry-After` header from `WithRetryAfter`; set it
+yourself with `c.Header("Retry-After", "30")` (Gin) or the framework's
+equivalent.
+
 chi, Gin, Echo and Fiber are not dependencies of this module and are not
 exercised by its tests (net/http is; chi works because it is an `http.Handler`
 router).
@@ -270,8 +274,9 @@ in registration order, then a generic 500.
   the original error, so the real cause is visible. `WithLogger(nil)` disables
   it. `r` is nil when `WriteError` is called without a request. The default
   logger includes `request_id` (when `WithRequestIDFunc` is set) and skips
-  `context.Canceled`, broken-pipe and connection-reset write errors, since the
-  client is gone; a custom logger still sees it.
+  `context.Canceled`, since the client is gone; a custom logger still sees it.
+  When `Handler` gets a broken-pipe or connection-reset error after the response
+  started, the client is gone and the error is dropped without logging.
 - **Panics:** `Recover` returns the standard 500 envelope and logs the panic
   with its stack as a separate `stack` attribute (the error message is just
   `panic: <value>`). It re-panics `http.ErrAbortHandler`. If the handler already

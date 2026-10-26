@@ -127,7 +127,8 @@ func (wr *Writer) prepare(r *http.Request, err error) *ErrorBody {
 // with WriteError. The result works with net/http, chi, and anything else that
 // accepts an http.Handler. If fn already started the response, the returned
 // error cannot be sent: it is passed to the Logger (when its status qualifies)
-// and no second envelope is appended. Headers set before returning an error
+// and no second envelope is appended (a broken-pipe or connection-reset write
+// error is dropped entirely: the client is gone). Headers set before returning an error
 // are kept, except Content-Length and Content-Disposition, which describe the
 // body that was never sent and would corrupt the error envelope.
 func (wr *Writer) Handler(fn HandlerFunc) http.HandlerFunc {
@@ -138,7 +139,9 @@ func (wr *Writer) Handler(fn HandlerFunc) http.HandlerFunc {
 			return
 		}
 		if tw.wrote {
-			_ = wr.prepare(r, err)
+			if !clientGone(err) {
+				_ = wr.prepare(r, err)
+			}
 			return
 		}
 		clearEntityHeaders(w.Header())
@@ -203,20 +206,19 @@ func clearEntityHeaders(h http.Header) {
 	h.Del("Content-Disposition")
 }
 
-// clientGone reports errors that mean the client went away mid-response, which
-// is not a server fault.
+// clientGone reports a write error that means the client went away mid-response.
+// It is only used once the response has started, where such an error comes from
+// our own write; the same errno from a database or upstream call is a real
+// server fault and must still be logged.
 func clientGone(err error) bool {
-	return errors.Is(err, context.Canceled) ||
-		errors.Is(err, syscall.EPIPE) ||
-		errors.Is(err, syscall.ECONNRESET)
+	return errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET)
 }
 
-// defaultLogger logs a 5xx with slog. It skips context.Canceled and broken-pipe
-// or connection-reset write errors: the client has already gone, so they are not
-// server faults and would only add noise. A custom Logger still sees every 5xx
-// and can make its own call.
+// defaultLogger logs a 5xx with slog. It skips context.Canceled: the client has
+// already gone, so it is not a server fault and would only add noise. A custom
+// Logger still sees every 5xx and can make its own call.
 func defaultLogger(r *http.Request, err error, eb *ErrorBody) {
-	if clientGone(err) {
+	if errors.Is(err, context.Canceled) {
 		return
 	}
 	attrs := []any{"code", eb.Code, "status", eb.HTTPStatus()}
