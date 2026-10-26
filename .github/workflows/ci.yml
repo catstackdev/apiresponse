@@ -8,13 +8,26 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ['1.22', stable]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: ${{ matrix.go-version }}
+      - name: gofmt
+        if: matrix.go-version == 'stable'
+        run: test -z "$(gofmt -l .)"
+      - name: go mod tidy
+        if: matrix.go-version == 'stable'
+        run: go mod tidy -diff
       - run: go vet ./...
-      - run: go test -race -cover ./...
+      - run: go test -race -shuffle=on -cover ./...
+      - name: fuzz smoke
+        run: |
+          go test -run '^$' -fuzz FuzzDecode -fuzztime 15s
+          go test -run '^$' -fuzz FuzzOffsetPage -fuzztime 5s
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -22,4 +35,14 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.5.0
+  vuln:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4 && govulncheck ./...
