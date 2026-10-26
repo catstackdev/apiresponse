@@ -141,3 +141,11 @@ func TestDecode_TooLargeDoesNotSetConnectionCloseOnHTTP2(t *testing.T) {
 		t.Fatalf("Connection = %q, want unset on HTTP/2", got)
 	}
 }
+
+func TestDecode_NilBody(t *testing.T) {
+	r := &http.Request{Method: http.MethodPost, Header: http.Header{}}
+	_, err := apiresponse.Decode[createUser](httptest.NewRecorder(), r)
+	if !apiresponse.IsCode(err, apiresponse.CodeBadRequest) {
+		t.Fatalf("err = %v, want bad_request", err)
+	}
+}

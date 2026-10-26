@@ -134,7 +134,7 @@ func TestWriter_MappersRunInOrderFirstWins(t *testing.T) {
 func TestWriter_DefaultLoggerHandlesNilRequest(t *testing.T) {
 	// Default logger (slog) must not panic with a nil request or on 5xx.
 	rec := httptest.NewRecorder()
-	_ = apiresponse.WriteError(rec, errors.New("boom"))
+	_ = apiresponse.WriteError(rec, nil, errors.New("boom"))
 	if rec.Code != 500 {
 		t.Fatalf("code=%d", rec.Code)
 	}
@@ -256,14 +256,14 @@ func TestDefaultLogger_IncludesRequestID(t *testing.T) {
 func TestDefaultLogger_SkipsContextCanceled(t *testing.T) {
 	buf := captureSlog(t)
 	rec := httptest.NewRecorder()
-	_ = apiresponse.WriteError(rec, context.Canceled)
+	_ = apiresponse.WriteError(rec, nil, context.Canceled)
 	if buf.Len() != 0 {
 		t.Fatalf("logged a client cancel: %q", buf.String())
 	}
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
 	}
-	_ = apiresponse.WriteError(httptest.NewRecorder(), errNoRows)
+	_ = apiresponse.WriteError(httptest.NewRecorder(), nil, errNoRows)
 	if buf.Len() == 0 {
 		t.Fatal("a real 5xx must still be logged")
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"time"
 )
 
 // Machine-readable error codes. Clients should switch on these, not on Message.
@@ -43,8 +44,9 @@ type ErrorBody struct {
 	Details   []Detail `json:"details,omitempty"`
 	RequestID string   `json:"request_id,omitempty"`
 
-	status int
-	cause  error
+	status     int
+	cause      error
+	retryAfter time.Duration
 }
 
 // ErrorResponse is the error envelope.
@@ -180,6 +182,15 @@ func (e *ErrorBody) WithDetails(details ...Detail) *ErrorBody {
 func (e *ErrorBody) WithRequestID(id string) *ErrorBody {
 	c := e.clone()
 	c.RequestID = id
+	return c
+}
+
+// WithRetryAfter returns a copy that makes the Writer send a Retry-After header,
+// rounded up to whole seconds. It is meant for 429 and 503 responses; a duration
+// of zero or less sends no header. The header is never part of the JSON body.
+func (e *ErrorBody) WithRetryAfter(d time.Duration) *ErrorBody {
+	c := e.clone()
+	c.retryAfter = d
 	return c
 }
 

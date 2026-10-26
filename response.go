@@ -43,8 +43,9 @@ func ListWithSummary[T any](items []T, p Pagination, summary any) Response[[]T] 
 }
 
 // CursorPage builds cursor-based pagination. A nil next means the last page.
+// A negative limit becomes 0, like in [OffsetPage].
 func CursorPage(limit int, next *string) Pagination {
-	return Pagination{Limit: limit, HasMore: next != nil, NextCursor: next}
+	return Pagination{Limit: max(limit, 0), HasMore: next != nil, NextCursor: next}
 }
 
 // OffsetPage builds offset-based pagination. page is 1-based. Out-of-range

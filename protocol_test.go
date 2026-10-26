@@ -51,7 +51,7 @@ func post(t *testing.T, c *http.Client, url, body string) (*http.Response, bool)
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	t.Cleanup(func() { resp.Body.Close() })
+	t.Cleanup(func() { _ = resp.Body.Close() })
 	_, _ = io.Copy(io.Discard, resp.Body)
 	return resp, reused
 }
@@ -114,7 +114,7 @@ func TestProtocols_ServeContentThroughRecover(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			got, _ := io.ReadAll(resp.Body)
 			if string(got) != payload || resp.StatusCode != http.StatusOK {
 				t.Fatalf("status = %d, body = %q", resp.StatusCode, got)

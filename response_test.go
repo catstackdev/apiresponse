@@ -132,3 +132,9 @@ func TestOffsetPage_NoOverflow(t *testing.T) {
 		t.Fatal("first page of a larger set must report HasMore")
 	}
 }
+
+func TestCursorPage_ClampsNegativeLimit(t *testing.T) {
+	if p := apiresponse.CursorPage(-5, nil); p.Limit != 0 {
+		t.Fatalf("Limit = %d, want 0", p.Limit)
+	}
+}

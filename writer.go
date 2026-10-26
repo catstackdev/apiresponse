@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"syscall"
+	"time"
 )
 
 // ErrorMapper converts a domain error into an *ErrorBody. Returning nil means
@@ -20,8 +23,9 @@ type ErrorMapper func(err error) *ErrorBody
 // real cause is visible even though the client only sees a generic message.
 type Logger func(r *http.Request, err error, eb *ErrorBody)
 
-// Writer writes envelopes with configurable error mapping and logging. The
-// zero value is not usable; create one with NewWriter. A Writer is safe for
+// Writer writes envelopes with configurable error mapping and logging. Create
+// one with NewWriter: the zero value works but has no mappers, request IDs or
+// logging (NewWriter enables the default slog logger). A Writer is safe for
 // concurrent use once constructed.
 type Writer struct {
 	mappers   []ErrorMapper
@@ -97,6 +101,9 @@ func (wr *Writer) Write(w http.ResponseWriter, status int, v any) error {
 // write/marshal failure, not err itself.
 func (wr *Writer) WriteError(w http.ResponseWriter, r *http.Request, err error) error {
 	eb := wr.prepare(r, err)
+	if eb.retryAfter > 0 {
+		w.Header().Set("Retry-After", retryAfterSeconds(eb.retryAfter))
+	}
 	return wr.Write(w, eb.HTTPStatus(), ErrorResponse{Error: eb})
 }
 
@@ -121,7 +128,8 @@ func (wr *Writer) prepare(r *http.Request, err error) *ErrorBody {
 // accepts an http.Handler. If fn already started the response, the returned
 // error cannot be sent: it is passed to the Logger (when its status qualifies)
 // and no second envelope is appended. Headers set before returning an error
-// (e.g. Retry-After on a 429) are kept.
+// are kept, except Content-Length and Content-Disposition, which describe the
+// body that was never sent and would corrupt the error envelope.
 func (wr *Writer) Handler(fn HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tw := &trackingWriter{ResponseWriter: w}
@@ -133,6 +141,7 @@ func (wr *Writer) Handler(fn HandlerFunc) http.HandlerFunc {
 			_ = wr.prepare(r, err)
 			return
 		}
+		clearEntityHeaders(w.Header())
 		_ = wr.WriteError(w, r, err)
 	}
 }
@@ -176,14 +185,44 @@ func (wr *Writer) resolve(err error) *ErrorBody {
 	return FromError(err)
 }
 
-// defaultLogger logs a 5xx with slog. It skips context.Canceled: the client has
-// already gone, so it is not a server fault and would only add noise. A custom
-// Logger still sees every 5xx and can make its own call.
+// retryAfterSeconds renders d as whole seconds, rounded up (written without
+// adding to d, which could overflow for huge durations).
+func retryAfterSeconds(d time.Duration) string {
+	secs := int64(d / time.Second)
+	if d%time.Second != 0 {
+		secs++
+	}
+	return strconv.FormatInt(secs, 10)
+}
+
+// clearEntityHeaders drops headers that describe a response body the handler
+// never finished sending. Content-Encoding is kept: a compression middleware
+// owns it and will still encode the error envelope.
+func clearEntityHeaders(h http.Header) {
+	h.Del("Content-Length")
+	h.Del("Content-Disposition")
+}
+
+// clientGone reports errors that mean the client went away mid-response, which
+// is not a server fault.
+func clientGone(err error) bool {
+	return errors.Is(err, context.Canceled) ||
+		errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, syscall.ECONNRESET)
+}
+
+// defaultLogger logs a 5xx with slog. It skips context.Canceled and broken-pipe
+// or connection-reset write errors: the client has already gone, so they are not
+// server faults and would only add noise. A custom Logger still sees every 5xx
+// and can make its own call.
 func defaultLogger(r *http.Request, err error, eb *ErrorBody) {
-	if errors.Is(err, context.Canceled) {
+	if clientGone(err) {
 		return
 	}
-	attrs := []any{"code", eb.Code, "status", eb.HTTPStatus(), "error", err}
+	attrs := []any{"code", eb.Code, "status", eb.HTTPStatus()}
+	if err != nil {
+		attrs = append(attrs, "error", err)
+	}
 	if eb.RequestID != "" {
 		attrs = append(attrs, "request_id", eb.RequestID)
 	}

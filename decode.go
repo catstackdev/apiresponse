@@ -37,7 +37,11 @@ func DecodeLimit[T any](w http.ResponseWriter, r *http.Request, maxBytes int64) 
 	if maxBytes <= 0 {
 		maxBytes = DefaultMaxBodyBytes
 	}
-	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBytes))
+	body := r.Body
+	if body == nil { // hand-built requests (e.g. in unit tests) may have no body
+		body = http.NoBody
+	}
+	data, err := io.ReadAll(http.MaxBytesReader(w, body, maxBytes))
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if w != nil && r.ProtoMajor == 1 && errors.As(err, &tooLarge) {

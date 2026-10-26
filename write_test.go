@@ -1,11 +1,17 @@
 package apiresponse_test
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
+	"log/slog"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/catstackdev/apiresponse"
 )
@@ -41,7 +47,7 @@ func TestWrite_MarshalFailureYields500(t *testing.T) {
 
 func TestWriteError(t *testing.T) {
 	rec := httptest.NewRecorder()
-	_ = apiresponse.WriteError(rec, apiresponse.NotFound("user not found"))
+	_ = apiresponse.WriteError(rec, nil, apiresponse.NotFound("user not found"))
 	want := `{"error":{"code":"not_found","message":"user not found"}}`
 	if rec.Code != 404 || rec.Body.String() != want {
 		t.Fatalf("code=%d body=%s", rec.Code, rec.Body)
@@ -118,6 +124,101 @@ func TestWrite_InvalidStatusYields500(t *testing.T) {
 		}
 		if !strings.Contains(rec.Body.String(), "internal_error") {
 			t.Fatalf("status %d: body = %q, want the internal error envelope", status, rec.Body.String())
+		}
+	}
+}
+
+func TestWrite_SetsNosniff(t *testing.T) {
+	rec := httptest.NewRecorder()
+	_ = apiresponse.Write(rec, http.StatusOK, apiresponse.OK(1))
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q", got)
+	}
+}
+
+func TestWriteError_LogsRequestPath(t *testing.T) {
+	var buf bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(old) })
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/boom", nil)
+	_ = apiresponse.WriteError(rec, req, errors.New("db down"))
+	if rec.Code != 500 || !strings.Contains(buf.String(), "path=/boom") {
+		t.Fatalf("code=%d log=%q", rec.Code, buf.String())
+	}
+}
+
+func TestWriteError_RetryAfter(t *testing.T) {
+	tests := []struct {
+		name string
+		d    time.Duration
+		want string
+	}{
+		{"whole seconds", 30 * time.Second, "30"},
+		{"rounded up", 1500 * time.Millisecond, "2"},
+		{"huge does not overflow", math.MaxInt64, "9223372037"},
+		{"zero sends nothing", 0, ""},
+		{"negative sends nothing", -time.Second, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			_ = apiresponse.WriteError(rec, nil, apiresponse.RateLimited("slow down").WithRetryAfter(tt.d))
+			if got := rec.Header().Get("Retry-After"); got != tt.want {
+				t.Fatalf("Retry-After = %q, want %q", got, tt.want)
+			}
+			if strings.Contains(rec.Body.String(), "retry") {
+				t.Fatalf("Retry-After leaked into body: %s", rec.Body)
+			}
+		})
+	}
+}
+
+func TestWithRetryAfter_DoesNotMutateSentinel(t *testing.T) {
+	base := apiresponse.RateLimited("slow down")
+	_ = base.WithRetryAfter(time.Minute)
+	rec := httptest.NewRecorder()
+	_ = apiresponse.WriteError(rec, nil, base)
+	if got := rec.Header().Get("Retry-After"); got != "" {
+		t.Fatalf("sentinel was mutated: Retry-After = %q", got)
+	}
+}
+
+func TestHandler_DropsStaleEntityHeadersOnError(t *testing.T) {
+	h := apiresponse.Handler(func(w http.ResponseWriter, _ *http.Request) error {
+		w.Header().Set("Content-Length", "999")
+		w.Header().Set("Content-Disposition", `attachment; filename="r.csv"`)
+		w.Header().Set("X-Keep", "yes")
+		return apiresponse.NotFound("gone")
+	})
+	rec := httptest.NewRecorder()
+	h(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	hdr := rec.Header()
+	if hdr.Get("Content-Length") != "" || hdr.Get("Content-Disposition") != "" || hdr.Get("X-Keep") != "yes" {
+		t.Fatalf("headers = %v", hdr)
+	}
+}
+
+func TestRecover_DropsStaleEntityHeaders(t *testing.T) {
+	h := apiresponse.Recover(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", "999")
+		panic("boom")
+	}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != 500 || rec.Header().Get("Content-Length") != "" {
+		t.Fatalf("code=%d headers=%v", rec.Code, rec.Header())
+	}
+}
+
+func TestDefaultLogger_SkipsClientGoneWriteErrors(t *testing.T) {
+	for _, err := range []error{syscall.EPIPE, syscall.ECONNRESET, fmt.Errorf("write: %w", syscall.EPIPE)} {
+		buf := captureSlog(t)
+		_ = apiresponse.WriteError(httptest.NewRecorder(), nil, err)
+		if buf.Len() != 0 {
+			t.Fatalf("logged a client disconnect (%v): %q", err, buf.String())
 		}
 	}
 }

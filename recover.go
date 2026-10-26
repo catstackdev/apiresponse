@@ -29,6 +29,7 @@ func (wr *Writer) Recover(next http.Handler) http.Handler {
 				_ = wr.prepare(r, perr) // too late to change the response; just log
 				return
 			}
+			clearEntityHeaders(w.Header())
 			_ = wr.WriteError(w, r, perr)
 		}()
 		next.ServeHTTP(tw, r)
